@@ -86,3 +86,16 @@ curl -X POST "http://localhost:8000/api/ingest/usgs?site_no=01646500&hours=24" \
 
 - VN ingest uses real hydro/weather feed; quality variables include derived proxies for compatibility with the anomaly pipeline.
 - Kafka publishing is controlled via `ENABLE_KAFKA_PUBLISH` in env.
+
+## RAG Memory Service (MongoDB + Redis Cache)
+
+New endpoints to support long-term chat memory retrieval:
+
+- `POST /api/memory/upsert` stores or updates a memory record (`text`, `tags`, `metadata`, optional `embedding`).
+- `POST /api/memory/search` returns top-k ranked memories using keyword score + optional embedding cosine similarity + recency bonus.
+- `DELETE /api/memory/{memory_id}` deletes one memory entry for the authenticated user.
+- `GET /api/memory/stats` returns memory/user/session counts.
+
+Auth note:
+- These endpoints require a bearer token from `/api/auth/token`.
+- `user_id` in payload must match the token subject (default: `admin`).

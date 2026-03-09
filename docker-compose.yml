@@ -17,6 +17,14 @@ services:
     ports:
       - "6379:6379"
 
+  mongo:
+    image: mongo:7
+    container_name: anomalyguard-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+
   kafka:
     image: bitnami/kafka:3.7
     container_name: anomalyguard-kafka
@@ -41,12 +49,14 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://anomaly:anomaly@db:5432/anomalyguard
       REDIS_URL: redis://redis:6379/0
+      MONGODB_URL: mongodb://mongo:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     ports:
       - "8000:8000"
     depends_on:
       - db
       - redis
+      - mongo
       - kafka
 
   celery-worker:
@@ -58,10 +68,12 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://anomaly:anomaly@db:5432/anomalyguard
       REDIS_URL: redis://redis:6379/0
+      MONGODB_URL: mongodb://mongo:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       - db
       - redis
+      - mongo
       - kafka
 
   frontend:
@@ -95,3 +107,4 @@ services:
 
 volumes:
   pgdata:
+  mongodata:

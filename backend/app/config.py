@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     poll_interval_seconds: float = 1.0
 
     redis_url: str = "redis://redis:6379/0"
+    memory_cache_ttl_seconds: int = 300
+    mongodb_url: str = "mongodb://mongo:27017"
+    mongodb_database: str = "anomalyguard"
+    mongodb_memory_collection: str = "rag_memory"
+
     kafka_bootstrap_servers: str = "kafka:9092"
     kafka_topic_alerts: str = "anomaly-alerts"
     enable_kafka_publish: bool = False

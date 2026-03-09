@@ -19,6 +19,7 @@ from app.config import settings
 from app.db import Base, SessionLocal, engine, get_db
 from app.dependencies import get_current_user, require_admin
 from app.schemas import AnomalyAlert, StationProfile, WaterReading
+from app.schemas_memory import MemorySearchRequest, MemoryUpsertRequest
 from app.services.auth import create_access_token, get_password_hash, verify_password
 from app.services.detector import HybridAnomalyDetector
 from app.services.kafka_publisher import AlertKafkaPublisher
@@ -134,6 +135,12 @@ async def stream_loop() -> None:
 @app.on_event("startup")
 async def startup() -> None:
     init_db()
+    try:
+        from app.services.memory_store import memory_store
+
+        memory_store.ensure_indexes()
+    except Exception:
+        pass
     if state.stream_task is None or state.stream_task.done():
         state.stream_task = asyncio.create_task(stream_loop())
 
@@ -168,7 +175,7 @@ def health() -> dict:
         "status": "ok",
         "stream_running": state.stream_task is not None and not state.stream_task.done(),
         "data_source": state.last_data_source,
-        "stack": ["fastapi", "postgres", "timescaledb", "celery", "redis", "kafka", "mlflow", "prometheus"],
+        "stack": ["fastapi", "postgres", "timescaledb", "mongodb", "celery", "redis", "kafka", "mlflow", "prometheus"],
     }
 
 
@@ -337,6 +344,47 @@ async def stop_stream(user: dict = Depends(require_admin)) -> dict:
     return {"stream_running": False, "requested_by": user.get("sub")}
 
 
+
+@app.post("/api/memory/upsert")
+def memory_upsert(payload: MemoryUpsertRequest, user: dict = Depends(get_current_user)) -> dict:
+    from app.services.memory_store import memory_store
+
+    if payload.user_id != user.get("sub"):
+        raise HTTPException(status_code=403, detail="user_id must match authenticated subject")
+    record = memory_store.upsert_memory(payload)
+    return {"status": "ok", "record": record.model_dump(mode="json")}
+
+
+@app.post("/api/memory/search")
+def memory_search(payload: MemorySearchRequest, user: dict = Depends(get_current_user)) -> dict:
+    from app.services.memory_store import memory_store
+
+    if payload.user_id != user.get("sub"):
+        raise HTTPException(status_code=403, detail="user_id must match authenticated subject")
+    response = memory_store.search(payload)
+    return response.model_dump(mode="json")
+
+
+@app.delete("/api/memory/{memory_id}")
+def memory_delete(memory_id: str, user: dict = Depends(get_current_user)) -> dict:
+    from app.services.memory_store import memory_store
+
+    deleted = memory_store.delete_memory(memory_id=memory_id, user_id=user.get("sub"))
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory record not found")
+    return {"deleted": True, "memory_id": memory_id}
+
+
+@app.get("/api/memory/stats")
+def memory_stats(user: dict = Depends(get_current_user)) -> dict:
+    from app.services.memory_store import memory_store
+
+    stats = memory_store.stats()
+    return {
+        **stats,
+        "cache_ttl_seconds": settings.memory_cache_ttl_seconds,
+        "requested_by": user.get("sub"),
+    }
 @app.websocket("/ws/stream")
 async def ws_stream(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -370,3 +418,4 @@ async def ws_stream(websocket: WebSocket) -> None:
     finally:
         with suppress(KeyError):
             state.clients.remove(websocket)
+
