@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -29,6 +29,11 @@ function App() {
   const [vnIngestStation, setVnIngestStation] = useState("mekong-can-tho");
   const [ingestMessage, setIngestMessage] = useState("");
   const [ingesting, setIngesting] = useState(false);
+
+  const [authToken, setAuthToken] = useState("");
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("admin123");
+  const [authMessage, setAuthMessage] = useState("");
 
   const loadSnapshot = useCallback((selectedStation, selectedWindow) => {
     const stationParam = selectedStation === "all" ? "" : `&station_id=${selectedStation}`;
@@ -74,9 +79,7 @@ function App() {
       }
 
       if (data.event === "station_registered") {
-        setIngestMessage(
-          `Ingested ${data.payload.inserted_readings} readings from ${data.payload.station.station_name}`
-        );
+        setIngestMessage(`Ingested ${data.payload.inserted_readings} readings from ${data.payload.station.station_name}`);
         loadSnapshot(stationId, sinceMinutes);
       }
 
@@ -105,12 +108,42 @@ function App() {
     loadSnapshot(stationId, sinceMinutes);
   }, [stationId, sinceMinutes, loadSnapshot]);
 
+  const runLogin = async () => {
+    setAuthMessage("");
+    const body = new URLSearchParams();
+    body.set("username", username);
+    body.set("password", password);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthMessage(data.detail || "Login failed");
+        return;
+      }
+      setAuthToken(data.access_token);
+      setAuthMessage("Admin token ready");
+    } catch {
+      setAuthMessage("Cannot reach backend");
+    }
+  };
+
   const runVNIngest = async () => {
     setIngestMessage("");
+    if (!authToken) {
+      setIngestMessage("Login admin first to run ingest.");
+      return;
+    }
+
     setIngesting(true);
     try {
       const res = await fetch(`${API_BASE}/api/ingest/vn?station_id=${vnIngestStation}&days=30`, {
         method: "POST",
+        headers: { Authorization: `Bearer ${authToken}` },
       });
       const body = await res.json();
       if (!res.ok) {
@@ -155,11 +188,22 @@ function App() {
   return (
     <div className="layout">
       <header className="header">
-        <h1>AnomalyGuard - Water Pollution MVP</h1>
-        <span className={connected ? "badge ok" : "badge err"}>
-          {connected ? "Realtime Connected" : "Disconnected"}
-        </span>
+        <h1>AnomalyGuard - Water Pollution Platform</h1>
+        <span className={connected ? "badge ok" : "badge err"}>{connected ? "Realtime Connected" : "Disconnected"}</span>
       </header>
+
+      <section className="panel authPanel">
+        <div>
+          <label htmlFor="username">Admin User</label>
+          <input id="username" value={username} onChange={(e) => setUsername(e.target.value)} />
+        </div>
+        <div>
+          <label htmlFor="password">Password</label>
+          <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </div>
+        <button onClick={runLogin}>Login</button>
+        <div className="muted tiny">{authMessage || "Required for ingest/stream controls."}</div>
+      </section>
 
       <section className="panel controls">
         <div>
@@ -204,12 +248,10 @@ function App() {
             ))}
           </select>
         </div>
-        <button onClick={runVNIngest} disabled={ingesting}>
+        <button onClick={runVNIngest} disabled={ingesting || !authToken}>
           {ingesting ? "Ingesting..." : "Ingest VN Real Data"}
         </button>
-        <div className="muted tiny">
-          {ingestMessage || "Uses Open-Meteo flood/weather data at VN coordinates for the last 30 days."}
-        </div>
+        <div className="muted tiny">{ingestMessage || "Uses Open-Meteo flood/weather data at VN coordinates for the last 30 days."}</div>
       </section>
 
       <section className="cards">

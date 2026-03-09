@@ -1,68 +1,88 @@
-﻿# AnomalyGuard Water Pollution MVP
+# AI-AnomalyGuard
 
-Water-first MVP for real-time anomaly detection in water telemetry.
+AI-powered anomaly detection platform for water monitoring, upgraded to a production-style multi-tech stack.
 
-## MVP Status
+## Upgraded Stack
 
-- Simulated stream (VN stations) for live demo continuity
-- Real VN ingestion path (Open-Meteo flood/weather API at VN coordinates)
-- Real-time stream via WebSocket
-- Hybrid anomaly detection (rules + z-score + Isolation Forest)
-- SQLite persistence for readings/alerts
-- Dashboard filters for station/time window and VN ingest action
+- API: FastAPI + WebSockets
+- Storage: PostgreSQL (TimescaleDB extension attempt) via SQLAlchemy
+- Async jobs: Celery + Redis
+- Streaming integration: Kafka publisher for alerts
+- ML: Isolation Forest + SHAP-ready explainability
+- ML ops: MLflow metric logging
+- Monitoring: Prometheus + Grafana
+- Auth: JWT (OAuth2 password flow) + admin RBAC
+- Infra: Docker Compose + Terraform scaffold
+- CI: GitHub Actions (backend compile + frontend build)
 
-## Data Region and Time
+## Project Structure
 
-- VN stations:
-  - `mekong-can-tho` (Can Tho, Mekong Delta)
-  - `saigon-thu-duc` (Thu Duc, Ho Chi Minh City)
-  - `red-river-ha-noi` (Long Bien, Ha Noi)
-- `POST /api/ingest/vn` pulls last `N` days of real hydro data for selected VN station coordinates.
-- All stored timestamps are UTC.
+- `backend/app/main.py`: API, RBAC, ingest orchestration, metrics endpoint
+- `backend/app/services/store_pg.py`: PostgreSQL data layer
+- `backend/app/services/detector.py`: hybrid anomaly scoring with SHAP fallback
+- `backend/app/tasks.py`: Celery ingestion tasks
+- `docker-compose.yml`: full local platform stack
+- `observability/prometheus/prometheus.yml`: Prometheus scrape config
+- `infra/terraform/main.tf`: Terraform scaffold
+- `.github/workflows/ci.yml`: CI pipeline
 
-## Important Data Note
+## Run Full Stack (Docker)
 
-For VN real ingest:
+```powershell
+docker compose up --build
+```
 
-- Real fields: river discharge (flood API), air temperature (weather API)
-- Derived proxy fields: pH, TDS, turbidity, DO (estimated from the real hydro/temperature series for anomaly pipeline compatibility)
+Services:
+- API: `http://localhost:8000`
+- Frontend: `http://localhost:5173`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000` (`admin/admin`)
 
-## Quick Start
-
-### Backend
+## Local Backend (without Docker)
 
 ```powershell
 cd backend
 python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+copy .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Frontend
+## Authentication
+
+Request admin token:
 
 ```powershell
-cd frontend
-npm install
-npm run dev
+curl -X POST "http://localhost:8000/api/auth/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin&password=admin123"
 ```
 
-## Ingest VN Real Data
+Use returned bearer token for protected endpoints (`/api/ingest/*`, `/api/stream/start`, `/api/stream/stop`).
+
+## Ingest Real Data
+
+Vietnam feed (Open-Meteo at VN coordinates):
 
 ```powershell
-curl -X POST "http://localhost:8000/api/ingest/vn?station_id=mekong-can-tho&days=30"
+curl -X POST "http://localhost:8000/api/ingest/vn?station_id=mekong-can-tho&days=30" \
+  -H "Authorization: Bearer <TOKEN>"
 ```
 
-Or use the dashboard button `Ingest VN Real Data`.
+USGS feed:
 
-## API Endpoints
+```powershell
+curl -X POST "http://localhost:8000/api/ingest/usgs?site_no=01646500&hours=24" \
+  -H "Authorization: Bearer <TOKEN>"
+```
 
-- `GET /health`
-- `GET /api/meta`
-- `GET /api/stations`
-- `GET /api/readings/latest?limit=400&station_id=mekong-can-tho&since_minutes=10080`
-- `GET /api/alerts/latest?limit=100&station_id=mekong-can-tho&since_minutes=10080`
-- `POST /api/ingest/vn?station_id=mekong-can-tho&days=30`
-- `POST /api/stream/start`
-- `POST /api/stream/stop`
-- `WS /ws/stream`
+## Observability
+
+- Prometheus metrics endpoint: `GET /metrics`
+- Alert/readings counters and ingest latency are exported
+
+## Notes
+
+- VN ingest uses real hydro/weather feed; quality variables include derived proxies for compatibility with the anomaly pipeline.
+- Kafka publishing is controlled via `ENABLE_KAFKA_PUBLISH` in env.

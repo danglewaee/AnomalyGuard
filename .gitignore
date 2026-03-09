@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 .venv/
@@ -9,6 +9,15 @@ dist/
 
 # Environment
 .env
+backend/.env
+
+# MLflow
+mlruns/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
 
 # OS
 .DS_Store

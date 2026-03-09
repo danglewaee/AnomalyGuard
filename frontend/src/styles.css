@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   color: #10243a;
   background: #f2f5f9;
@@ -30,16 +30,30 @@ h2 {
   margin: 0;
 }
 
-.controls {
-  margin-top: 14px;
+.authPanel,
+.controls,
+.ingestPanel {
+  margin-top: 12px;
   display: grid;
   gap: 12px;
-  grid-template-columns: 1.4fr 1fr 1.6fr;
   align-items: end;
 }
 
+.authPanel {
+  grid-template-columns: 1fr 1fr 120px 1.6fr;
+}
+
+.controls {
+  grid-template-columns: 1.4fr 1fr 1.6fr;
+}
+
+.ingestPanel {
+  grid-template-columns: 1.3fr 180px 2fr;
+}
+
 .controls label,
-.ingestPanel label {
+.ingestPanel label,
+.authPanel label {
   display: block;
   font-size: 0.8rem;
   color: #5f6f80;
@@ -47,7 +61,9 @@ h2 {
 }
 
 .controls select,
-.ingestPanel input {
+.ingestPanel input,
+.ingestPanel select,
+.authPanel input {
   width: 100%;
   border: 1px solid #d6e0ec;
   border-radius: 8px;
@@ -55,14 +71,7 @@ h2 {
   background: #fff;
 }
 
-.ingestPanel {
-  margin-top: 12px;
-  display: grid;
-  grid-template-columns: 1.3fr 180px 2fr;
-  gap: 12px;
-  align-items: end;
-}
-
+.authPanel button,
 .ingestPanel button {
   border: 0;
   background: #1d6fd4;
@@ -73,6 +82,7 @@ h2 {
   cursor: pointer;
 }
 
+.authPanel button:disabled,
 .ingestPanel button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -181,6 +191,7 @@ h2 {
 }
 
 @media (max-width: 920px) {
+  .authPanel,
   .controls,
   .grid,
   .ingestPanel {
