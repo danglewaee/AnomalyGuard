@@ -1,33 +1,46 @@
-# System Design Roadmap (Level C)
+# System Design Roadmap (Level C, Tech Stack v2)
 
-## Phase 1: Credible Optimizer (done/active)
+## Phase 1: Stabilize Current MVP
 
 - [x] LSTM predictor
 - [x] MILP optimizer with spot-risk and pod packing
 - [x] What-if scenario API
 - [x] Baseline-vs-MILP benchmark harness
 
-## Phase 2: Real Infra Integration
+## Phase 2: Protocol + Policy Foundation
 
-- [x] Kubernetes patch generator (`Deployment` + VPA patch)
-- [x] Terraform plan patch generator (instance type/count snippet)
-- [ ] Safe rollout controller (canary + rollback policy)
+- [ ] Introduce gRPC + Protobuf for internal service calls
+- [ ] Add OPA/Rego policy gate (`policy-evaluator`)
+- [ ] Define CRDs (`AutopilotPolicy`, `AutopilotPlan`)
 
-## Phase 3: Scale and Reliability
+## Phase 3: Kubernetes-Native Control Plane (Go)
 
-- [x] 200 services / 500 nodes simulation profile
-- [ ] 100k+ metrics/min load profile + throughput report
-- [ ] Decision latency SLO (`p95 < 3s`)
+- [ ] Implement `autopilot-agent` (Go)
+- [ ] Implement `autopilot-controller` (Go)
+- [ ] Integrate Argo Rollouts for canary and rollback
 
-## Phase 4: Open-Source Packaging
+## Phase 4: Stream/Storage Scale Upgrade
 
-- [ ] Split modules: `autopilot-core`, `autopilot-agent`, `autopilot-dashboard`
-- [ ] Helm chart install path
-- [ ] Demo scenario and benchmark report in CI
+- [ ] Add Flink streaming feature jobs
+- [ ] Add ClickHouse analytics store
+- [ ] Keep TimescaleDB for operational horizon
+
+## Phase 5: Ingestion Throughput Upgrade (Rust)
+
+- [ ] Build `telemetry-gateway` in Rust
+- [ ] Hit and publish 100k+ metrics/min benchmark report
+- [ ] Add backpressure + retry semantics validation
+
+## Phase 6: Open-Source Productization
+
+- [ ] Split modules into `autopilot-*` packages
+- [ ] Add Helm chart install path
+- [ ] Add CI benchmark and demo artifacts
 
 ## Suggested KPIs
 
 - Cost reduction vs baseline: `>= 20%`
 - Latency constraint violation rate: `< 1%`
-- Spot interruption safety: no SLO break under simulated interruption profile
-- Optimizer solve time: `p95 < 1s` for 200 services / 500 nodes scenario
+- Optimizer solve time: `p95 < 1s` (200 services / 500 nodes)
+- Decision API latency: `p95 < 3s`
+- Ingestion throughput: `>= 100k metrics/min`

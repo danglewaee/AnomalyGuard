@@ -96,6 +96,7 @@ python scripts/benchmark_baseline_vs_milp.py --limit 50 --traffic-multiplier 1.5
 ## Design docs
 
 - `docs/architecture.md`
+- `docs/architecture-v2.md`
 - `docs/system-design.md`
 
 ## Bench hooks to implement next
@@ -103,3 +104,5 @@ python scripts/benchmark_baseline_vs_milp.py --limit 50 --traffic-multiplier 1.5
 - Add true pipeline throughput benchmark for 100k+ metrics/min.
 - Add autonomous apply mode with rollout guardrails.
 - Add multi-cluster control plane mode (`autopilot-core` + `autopilot-agent`).
+
+
