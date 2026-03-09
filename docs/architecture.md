@@ -7,36 +7,37 @@
 - `predictor`: LSTM forecasting (`rps`, `cpu`) with heuristic fallback.
 - `optimizer`: MILP-based scheduler with cost, latency, pod packing, and spot-risk constraints.
 - `simulator`: queueing-style latency risk simulation.
-- `decision`: predictive hybrid HPA+VPA orchestrator with risk guardrails and patch artifacts.
+- `decision`: predictive hybrid HPA+VPA orchestrator with request-id logging, rollout policy gating, and patch artifacts.
 - `dashboard`: realtime and what-if UI.
 
-## Optimization Flow
+## Optimization and Rollout Flow
 
 1. Predictor forecasts demand for horizons 5m, 15m, and 60m.
-2. Decision layer computes a planning demand and calls MILP optimizer.
+2. Decision layer computes planning demand and calls MILP optimizer.
 3. Optimizer solves node mix with throughput, latency-utilization, pod packing, and spot ratio constraints.
 4. Simulator validates expected latency and risk.
-5. Guardrail simulation tests +20% surge before downscale; if unsafe, downscale is blocked.
-6. Decision API returns final recommendation + impact + infrastructure patches.
+5. Downscale guardrail runs surge (+20%) check before allowing downscale.
+6. Rollout policy selects `shadow`, `canary`, or `rollback`.
+7. Decision API returns final recommendation + impact + infrastructure patches.
 
-## Current Constraints Model
+## Multi-Cluster Profiles
 
-- Throughput: `sum(nodes_i * capacity_rps_i) >= required_rps / util_cap`
-- Pod packing: `sum(nodes_i * pod_capacity_i) >= required_pods`
-- CPU envelope: `sum(nodes_i * cpu_i) >= required_pods * pod_cpu / 0.8`
-- Memory envelope: `sum(nodes_i * mem_i) >= required_pods * pod_mem / 0.85`
-- Spot ratio: `spot_nodes <= max_spot_ratio * total_nodes`
+- `default`
+- `dev-cluster`
+- `prod-cluster`
+- `gpu-cluster`
+
+Each profile defines default node count, instance class, latency budget, and max downscale step.
 
 ## Decision Outputs
 
 - Horizontal decision: `recommended.nodes`, `recommended.instance_type`
 - Vertical decision: `recommended.vertical.cpu_request_m`, `recommended.vertical.memory_request_mi`
-- Guardrail status: `policy.downscale_guardrail_triggered`, `policy.guardrail_reason`
+- Rollout gate: `policy.rollout.stage`, `policy.rollout.apply_allowed`, `policy.rollout.rollback_required`
+- Baseline comparison: `baseline.optimizer_savings_vs_reactive_pct`
 - Artifacts: Kubernetes deployment patch, VPA patch, Terraform module snippet
 
-## Level C Upgrade Path
+## Observability
 
-- Replace static catalog with cloud pricing adapters.
-- Add true 100k+ metrics/min throughput benchmark report.
-- Add autonomous apply mode with rollout guardrails.
-- Add multi-cluster control plane (`autopilot-core` + `autopilot-agent`).
+- Request correlation: `x-request-id` middleware.
+- Structured logs on each decision request with elapsed time.

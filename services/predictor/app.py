@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from model import LSTMForecaster, load_checkpoint
 app = FastAPI(title="predictor")
 DB_DSN = os.getenv("DB_DSN", "postgresql://optimizer:optimizer@localhost:5432/optimizer")
 MODEL_PATH = os.getenv("MODEL_PATH", "/app/checkpoints/rps_lstm.pt")
+REGISTRY_PATH = os.getenv("MODEL_REGISTRY_PATH", "/app/checkpoints/model_registry.json")
 
 pool: asyncpg.Pool | None = None
 model: LSTMForecaster | None = None
@@ -167,7 +169,22 @@ def model_status() -> dict:
     }
 
 
+@app.get("/model/registry")
+def model_registry() -> dict:
+    path = Path(REGISTRY_PATH)
+    if not path.exists():
+        return {"exists": False, "path": REGISTRY_PATH, "active_model": None, "models": []}
+
+    try:
+        body = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"exists": True, "path": REGISTRY_PATH, "error": str(exc)}
+
+    body["exists"] = True
+    body["path"] = REGISTRY_PATH
+    return body
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True}
-

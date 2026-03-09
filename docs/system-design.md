@@ -1,46 +1,39 @@
-# System Design Roadmap (Level C, Tech Stack v2)
+# System Design Roadmap (Level C, FAANG Hardening)
 
-## Phase 1: Stabilize Current MVP
+## Axis 1: Reliability-first Rollout
 
-- [x] LSTM predictor
-- [x] MILP optimizer with spot-risk and pod packing
-- [x] What-if scenario API
-- [x] Baseline-vs-MILP benchmark harness
+- [x] Shadow/Canary/Rollback policy endpoint (`GET /rollout/{service}`)
+- [x] Surge-aware downscale guardrail (+20% traffic check)
+- [ ] Integrate Argo Rollouts for live canary execution
 
-## Phase 2: Protocol + Policy Foundation
+## Axis 2: Online Learning Loop
 
-- [ ] Introduce gRPC + Protobuf for internal service calls
-- [ ] Add OPA/Rego policy gate (`policy-evaluator`)
-- [ ] Define CRDs (`AutopilotPolicy`, `AutopilotPlan`)
+- [x] Retrain-and-register script (`scripts/retrain_register.py`)
+- [x] Model registry endpoint (`GET /model/registry`)
+- [ ] Drift detection + auto rollback to previous model
 
-## Phase 3: Kubernetes-Native Control Plane (Go)
+## Axis 3: Multi-Cluster Control
 
-- [ ] Implement `autopilot-agent` (Go)
-- [ ] Implement `autopilot-controller` (Go)
-- [ ] Integrate Argo Rollouts for canary and rollback
+- [x] Cluster profile-aware decisions (`cluster` query parameter)
+- [x] Cluster-aware Terraform patch generation
+- [ ] Global optimizer across clusters with quota constraints
 
-## Phase 4: Stream/Storage Scale Upgrade
+## Axis 4: Strong Evaluation Framework
 
-- [ ] Add Flink streaming feature jobs
-- [ ] Add ClickHouse analytics store
-- [ ] Keep TimescaleDB for operational horizon
+- [x] Baseline-vs-MILP benchmark with SLO metrics (`benchmark_baseline_vs_milp.py`)
+- [x] Rollout backtesting script (`backtest_rollout_policy.py`)
+- [ ] CI benchmark publish and trend tracking
 
-## Phase 5: Ingestion Throughput Upgrade (Rust)
+## Axis 5: Production Engineering Quality
 
-- [ ] Build `telemetry-gateway` in Rust
-- [ ] Hit and publish 100k+ metrics/min benchmark report
-- [ ] Add backpressure + retry semantics validation
-
-## Phase 6: Open-Source Productization
-
-- [ ] Split modules into `autopilot-*` packages
-- [ ] Add Helm chart install path
-- [ ] Add CI benchmark and demo artifacts
+- [x] Request-id middleware + structured logs
+- [ ] OpenTelemetry traces and metrics export
+- [ ] Chaos test suite (predictor/optimizer/simulator failure injection)
 
 ## Suggested KPIs
 
-- Cost reduction vs baseline: `>= 20%`
-- Latency constraint violation rate: `< 1%`
-- Optimizer solve time: `p95 < 1s` (200 services / 500 nodes)
+- Cost reduction vs reactive baseline: `>= 20%`
+- Latency SLO violation rate: `< 1%`
+- Rollback trigger rate under normal load: `< 5%`
 - Decision API latency: `p95 < 3s`
-- Ingestion throughput: `>= 100k metrics/min`
+- Ingestion throughput (target): `>= 100k metrics/min`

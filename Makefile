@@ -1,4 +1,4 @@
-.PHONY: up down logs ps build up-scale bench
+.PHONY: up down logs ps build up-scale bench retrain backtest
 
 up:
 	docker compose -f infra/docker-compose/docker-compose.yml up --build -d
@@ -19,4 +19,10 @@ build:
 	docker compose -f infra/docker-compose/docker-compose.yml build
 
 bench:
-	python scripts/benchmark_baseline_vs_milp.py --limit 20 --traffic-multiplier 1.2
+	python scripts/benchmark_baseline_vs_milp.py --limit 20 --traffic-multiplier 1.2 --output-json benchmark_report.json
+
+retrain:
+	python scripts/retrain_register.py --dsn postgresql://optimizer:optimizer@localhost:5432/optimizer
+
+backtest:
+	python scripts/backtest_rollout_policy.py --limit 10 --traffic-multiplier 1.2 --output-json rollout_backtest_report.json

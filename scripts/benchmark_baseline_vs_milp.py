@@ -7,7 +7,7 @@ import math
 import statistics
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 
 @dataclass
@@ -78,7 +78,7 @@ def run(args: argparse.Namespace) -> None:
                 "service": service,
                 "current_nodes": current_nodes,
                 "pred_rps": pred_rps,
-                "latency_budget_ms": 200.0,
+                "latency_budget_ms": args.latency_budget_ms,
                 "current_instance_type": b_type,
             },
         )
@@ -118,18 +118,37 @@ def run(args: argparse.Namespace) -> None:
     avg_base_util = statistics.mean(r.baseline_util for r in results)
     avg_milp_util = statistics.mean(r.milp_util for r in results)
 
+    base_slo_violation_rate = sum(1 for r in results if r.baseline_latency > args.latency_budget_ms) / len(results)
+    milp_slo_violation_rate = sum(1 for r in results if r.milp_latency > args.latency_budget_ms) / len(results)
+
     cost_reduction = ((avg_base_cost - avg_milp_cost) / avg_base_cost) * 100 if avg_base_cost else 0.0
 
+    summary = {
+        "services_tested": len(results),
+        "traffic_multiplier": args.traffic_multiplier,
+        "latency_budget_ms": args.latency_budget_ms,
+        "baseline_avg_hourly_cost": avg_base_cost,
+        "milp_avg_hourly_cost": avg_milp_cost,
+        "cost_reduction_pct": cost_reduction,
+        "baseline_avg_p95_latency_ms": avg_base_lat,
+        "milp_avg_p95_latency_ms": avg_milp_lat,
+        "baseline_avg_utilization": avg_base_util,
+        "milp_avg_utilization": avg_milp_util,
+        "baseline_slo_violation_rate": base_slo_violation_rate,
+        "milp_slo_violation_rate": milp_slo_violation_rate,
+    }
+
     print("=== Baseline vs MILP Benchmark ===")
-    print(f"services_tested: {len(results)}")
-    print(f"traffic_multiplier: {args.traffic_multiplier:.2f}")
-    print(f"baseline_avg_hourly_cost: {avg_base_cost:.4f}")
-    print(f"milp_avg_hourly_cost: {avg_milp_cost:.4f}")
-    print(f"cost_reduction_pct: {cost_reduction:.2f}")
-    print(f"baseline_avg_p95_latency_ms: {avg_base_lat:.2f}")
-    print(f"milp_avg_p95_latency_ms: {avg_milp_lat:.2f}")
-    print(f"baseline_avg_utilization: {avg_base_util:.3f}")
-    print(f"milp_avg_utilization: {avg_milp_util:.3f}")
+    for k, v in summary.items():
+        if isinstance(v, float):
+            print(f"{k}: {v:.4f}")
+        else:
+            print(f"{k}: {v}")
+
+    if args.output_json:
+        with open(args.output_json, "w", encoding="utf-8") as f:
+            json.dump({"summary": summary, "results": [asdict(r) for r in results]}, f, indent=2)
+        print(f"wrote: {args.output_json}")
 
 
 if __name__ == "__main__":
@@ -141,4 +160,6 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--traffic-multiplier", type=float, default=1.0)
     parser.add_argument("--current-nodes", type=int, default=12)
+    parser.add_argument("--latency-budget-ms", type=float, default=200.0)
+    parser.add_argument("--output-json", default="")
     run(parser.parse_args())

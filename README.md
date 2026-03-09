@@ -1,4 +1,4 @@
-# Self-Optimizing Cloud Infrastructure AI (MVP -> Level C)
+# Self-Optimizing Cloud Infrastructure AI (MVP -> FAANG Hardening)
 
 MVP system that simulates cloud telemetry, predicts workload, recommends scaling actions, and visualizes cost/latency impact.
 
@@ -9,12 +9,22 @@ MVP system that simulates cloud telemetry, predicts workload, recommends scaling
 - `predictor`: LSTM forecasting service with heuristic fallback.
 - `optimizer`: MILP scheduler (OR-Tools) with pod packing and spot-risk guardrails.
 - `simulator`: queueing-based latency estimator.
-- `decision`: predictive hybrid HPA+VPA orchestration with risk-aware downscale guardrail and patch artifacts.
+- `decision`: predictive hybrid HPA+VPA orchestration with risk-aware downscale guardrail, shadow/canary/rollback rollout plan, and multi-cluster policy profiles.
 - `dashboard`: real-time UI with what-if analysis.
 
 ## Architecture
 
 `telemetry-simulator -> collector -> (timescaledb + kafka) -> predictor/optimizer/simulator -> decision -> dashboard`
+
+## FAANG hardening features implemented
+
+- Reliability rollout policy: shadow/canary/rollback gates via `GET /rollout/{service}`.
+- Online learning loop hooks: retrain + model registry metadata script (`scripts/retrain_register.py`).
+- Multi-cluster decision support: cluster profiles (`default`, `dev-cluster`, `prod-cluster`, `gpu-cluster`).
+- Evaluation framework:
+  - baseline-vs-MILP benchmark (`scripts/benchmark_baseline_vs_milp.py`)
+  - rollout backtest (`scripts/backtest_rollout_policy.py`)
+- Observability foundation: request-id middleware + structured decision logs.
 
 ## Quick start
 
@@ -51,58 +61,27 @@ make down
 
 ## Key API examples
 
-- Ingest telemetry: `POST /ingest` on collector
-- Forecast one service: `GET /forecast/{service}?horizon_min=30`
-- Optimize plan (MILP): `POST /optimize`
-- Simulate latency: `POST /simulate`
-- Build recommendation: `GET /decision/{service}`
-- List recommendations: `GET /decision_all`
-- What-if (single service): `GET /what_if/{service}?traffic_multiplier=1.3`
-- What-if (all services): `GET /what_if_all?traffic_multiplier=1.3&limit=10`
-- Generate infra patches (Deployment + VPA + Terraform): `GET /artifacts/{service}?traffic_multiplier=1.2`
+- Build recommendation: `GET /decision/{service}?cluster=prod-cluster`
+- What-if scenario: `GET /what_if/{service}?traffic_multiplier=1.3&cluster=prod-cluster`
+- Rollout gate decision: `GET /rollout/{service}?cluster=prod-cluster`
+- Generate infra patches (Deployment + VPA + Terraform): `GET /artifacts/{service}?traffic_multiplier=1.2&cluster=prod-cluster`
 
-## Train LSTM predictor
-
-After the stack is running and metrics are flowing:
+## Training and evaluation commands
 
 ```bash
-docker compose -f infra/docker-compose/docker-compose.yml exec predictor python train_lstm.py --dsn postgresql://optimizer:optimizer@postgres:5432/optimizer --output /app/checkpoints/rps_lstm.pt --epochs 15
-```
-
-Restart predictor to load the new model:
-
-```bash
-docker compose -f infra/docker-compose/docker-compose.yml restart predictor
-```
-
-Check model status:
-
-```bash
-curl http://localhost:8002/model/status
-```
-
-## Benchmark baseline vs MILP
-
-```bash
+make retrain
 make bench
+make backtest
 ```
 
-Or customize:
+Outputs:
 
-```bash
-python scripts/benchmark_baseline_vs_milp.py --limit 50 --traffic-multiplier 1.5
-```
+- `benchmark_report.json`
+- `rollout_backtest_report.json`
+- `services/predictor/checkpoints/model_registry.json`
 
 ## Design docs
 
 - `docs/architecture.md`
 - `docs/architecture-v2.md`
 - `docs/system-design.md`
-
-## Bench hooks to implement next
-
-- Add true pipeline throughput benchmark for 100k+ metrics/min.
-- Add autonomous apply mode with rollout guardrails.
-- Add multi-cluster control plane mode (`autopilot-core` + `autopilot-agent`).
-
-
