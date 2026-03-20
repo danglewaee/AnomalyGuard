@@ -18,14 +18,23 @@ from app.celery_app import celery_app
 from app.config import settings
 from app.db import Base, SessionLocal, engine, get_db
 from app.dependencies import get_current_user, require_admin
-from app.schemas import AnomalyAlert, StationProfile, WaterReading
+from app.schemas import AlertStatusUpdateRequest, AnomalyAlert, StationProfile, WaterReading
 from app.services.auth import create_access_token, get_password_hash, verify_password
 from app.services.detector import HybridAnomalyDetector
 from app.services.kafka_publisher import AlertKafkaPublisher
-from app.services.metrics import ALERTS_GENERATED, INGEST_DURATION, READINGS_INGESTED
+from app.services.metrics import (
+    ALERTS_GENERATED,
+    INGEST_DURATION,
+    NOTIFICATIONS_DELIVERED,
+    NOTIFICATIONS_FAILED,
+    NOTIFICATIONS_QUEUED,
+    READINGS_INGESTED,
+)
 from app.services.mlflow_logger import log_ingest_metrics
+from app.services.notification_pipeline import build_notification_plan, dispatch_notification_plan
+from app.services.risk_policy import build_community_alert, validate_status_transition
 from app.services.simulator import WaterReadingSimulator
-from app.services.stations import default_station_id, has_station, list_stations, register_station
+from app.services.stations import default_station_id, get_station, has_station, list_stations, register_station
 from app.services.store_pg import PostgresStore
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
@@ -67,6 +76,50 @@ def ensure_valid_station(station_id: str | None) -> None:
         raise HTTPException(status_code=404, detail=f"Unknown station_id: {station_id}")
 
 
+def ensure_alert_columns() -> None:
+    statements = [
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS community_name VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS water_use_type VARCHAR(32) DEFAULT 'mixed'",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS community_risk_level VARCHAR(32) DEFAULT 'low'",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS affected_groups JSONB DEFAULT '[]'::jsonb",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS potential_impact TEXT DEFAULT ''",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS recommended_actions JSONB DEFAULT '[]'::jsonb",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS time_to_acknowledge_minutes INTEGER DEFAULT 60",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS time_to_intervene_minutes INTEGER DEFAULT 240",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS escalation_target VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'new'",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS status_note TEXT DEFAULT ''",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS risk_confidence DOUBLE PRECISION DEFAULT 0",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS data_quality_flag VARCHAR(32) DEFAULT 'uncertain'",
+    ]
+    with engine.begin() as conn:
+        for stmt in statements:
+            conn.execute(text(stmt))
+
+
+def ensure_notification_table() -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id VARCHAR(64) PRIMARY KEY,
+                    alert_id VARCHAR(64) NOT NULL,
+                    station_id VARCHAR(128) NOT NULL,
+                    channel VARCHAR(32) NOT NULL,
+                    recipient VARCHAR(255) NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    body TEXT NOT NULL,
+                    delivery_status VARCHAR(32) NOT NULL DEFAULT 'queued',
+                    delivery_detail TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL,
+                    delivered_at TIMESTAMPTZ NULL
+                )
+                """
+            )
+        )
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
@@ -75,6 +128,8 @@ def init_db() -> None:
             conn.execute(text("SELECT create_hypertable('readings', 'timestamp', if_not_exists => TRUE)"))
         except Exception:
             pass
+    ensure_alert_columns()
+    ensure_notification_table()
 
 
 async def broadcast(event: str, payload: dict) -> None:
@@ -100,20 +155,60 @@ def insert_reading_and_alert(db: Session, reading: WaterReading) -> AnomalyAlert
     if not result.is_anomaly:
         return None
 
-    explain_text = "Top factors: " + ", ".join([f"{k}={v:.2f}" for k, v in result.contributions.items()])
-    alert = AnomalyAlert(
-        id=str(uuid.uuid4()),
-        timestamp=reading.timestamp,
-        station_id=reading.station_id,
-        severity=result.severity,
-        score=result.score,
-        reasons=result.reasons,
-        feature_contributions=result.contributions,
+    station = get_station(reading.station_id)
+    alert = build_community_alert(
+        reading=reading,
+        station=station,
+        result=result,
+        alert_id=str(uuid.uuid4()),
     )
+    explain_text = "Top factors: " + ", ".join([f"{k}={v:.2f}" for k, v in result.contributions.items()])
     store.add_alert(alert, explanation_text=explain_text)
     ALERTS_GENERATED.inc()
     state.kafka_publisher.publish_alert(alert.model_dump(mode="json"))
+    trigger_notifications(alert, station)
     return alert
+
+
+def trigger_notifications(alert: AnomalyAlert, station: StationProfile) -> None:
+    if not settings.enable_notifications:
+        return
+
+    if settings.enable_async_notifications:
+        celery_app.send_task(
+            "tasks.notify_alert",
+            args=[alert.model_dump(mode="json"), station.model_dump(mode="json")],
+        )
+        return
+
+    notifications = build_notification_plan(alert, station)
+    if not notifications:
+        return
+
+    with SessionLocal() as db:
+        store = PostgresStore(db)
+        for item in notifications:
+            NOTIFICATIONS_QUEUED.labels(channel=item.channel).inc()
+            store.upsert_notification(item)
+
+        results = dispatch_notification_plan(
+            notifications,
+            webhook_url=settings.notification_webhook_url,
+            enable_webhook=settings.enable_webhook_notifications,
+        )
+
+        for result in results:
+            row = store.update_notification_delivery(
+                notification_id=result.id,
+                delivery_status=result.delivery_status,
+                delivery_detail=result.delivery_detail,
+                delivered_at=result.delivered_at,
+            )
+            channel = row.channel if row is not None else "webhook"
+            if result.delivery_status == "delivered":
+                NOTIFICATIONS_DELIVERED.labels(channel=channel).inc()
+            else:
+                NOTIFICATIONS_FAILED.labels(channel=channel).inc()
 
 
 async def stream_loop() -> None:
@@ -226,12 +321,76 @@ def explain_alert(alert_id: str, db: Session = Depends(get_db), user: dict = Dep
         "severity": row.severity,
         "reasons": row.reasons,
         "feature_contributions": row.feature_contributions,
+        "community_name": getattr(row, "community_name", "") or "",
+        "water_use_type": getattr(row, "water_use_type", "mixed") or "mixed",
+        "community_risk_level": getattr(row, "community_risk_level", "low") or "low",
+        "affected_groups": getattr(row, "affected_groups", []) or [],
+        "potential_impact": getattr(row, "potential_impact", "") or "",
+        "recommended_actions": getattr(row, "recommended_actions", []) or [],
+        "time_to_acknowledge_minutes": getattr(row, "time_to_acknowledge_minutes", 60) or 60,
+        "time_to_intervene_minutes": getattr(row, "time_to_intervene_minutes", 240) or 240,
+        "escalation_target": getattr(row, "escalation_target", "") or "",
+        "status": getattr(row, "status", "new") or "new",
+        "status_note": getattr(row, "status_note", "") or "",
+        "risk_confidence": getattr(row, "risk_confidence", 0.0) or 0.0,
+        "data_quality_flag": getattr(row, "data_quality_flag", "uncertain") or "uncertain",
         "explanation": row.explanation_text,
         "requested_by": user.get("sub"),
     }
 
 
-def _persist_ingest_payload(payload: dict[str, Any]) -> tuple[dict, int, int]:
+@app.patch("/api/alerts/{alert_id}/status")
+def update_alert_status(
+    alert_id: str,
+    payload: AlertStatusUpdateRequest,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_admin),
+) -> dict:
+    store = PostgresStore(db)
+    row = store.get_alert(alert_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    current_status = getattr(row, "status", "new") or "new"
+    if not validate_status_transition(current_status, payload.status):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Invalid status transition: {current_status} -> {payload.status}",
+        )
+
+    updated = store.update_alert_status(alert_id, payload.status, payload.note)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    event_payload = {
+        "id": updated.id,
+        "status": updated.status,
+        "status_note": getattr(updated, "status_note", "") or "",
+        "updated_by": user.get("sub"),
+    }
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(broadcast("alert_status", event_payload))
+    except RuntimeError:
+        pass
+
+    return event_payload
+
+
+@app.get("/api/alerts/{alert_id}/notifications")
+def alert_notifications(
+    alert_id: str,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+) -> list[dict]:
+    row = PostgresStore(db).get_alert(alert_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    records = PostgresStore(db).notifications_for_alert(alert_id)
+    return [{**record.model_dump(mode="json"), "requested_by": user.get("sub")} for record in records]
+
+
+def _persist_ingest_payload(payload: dict[str, Any]) -> tuple[StationProfile, int, int]:
     station = payload["station"]
     register_station(StationProfile(**station))
 
@@ -253,7 +412,7 @@ def _persist_ingest_payload(payload: dict[str, Any]) -> tuple[dict, int, int]:
             if insert_reading_and_alert(db, reading) is not None:
                 alerts += 1
 
-    return station, inserted, alerts
+    return StationProfile(**station), inserted, alerts
 
 
 @app.post("/api/ingest/vn")
@@ -274,16 +433,17 @@ async def ingest_vn(
     INGEST_DURATION.observe(perf_counter() - t0)
     log_ingest_metrics("vn", inserted, alerts)
 
+    station_payload = station.model_dump(mode="json")
     await broadcast(
         "station_registered",
-        {"station": station, "inserted_readings": inserted, "generated_alerts": alerts, "source": "api/open-meteo-vn"},
+        {"station": station_payload, "inserted_readings": inserted, "generated_alerts": alerts, "source": "api/open-meteo-vn"},
     )
 
     return {
         "status": "ok",
         "source": "api/open-meteo-vn",
         "requested_by": user.get("sub"),
-        "station": station,
+        "station": station_payload,
         "inserted_readings": inserted,
         "generated_alerts": alerts,
     }
@@ -306,16 +466,17 @@ async def ingest_usgs(
     INGEST_DURATION.observe(perf_counter() - t0)
     log_ingest_metrics("usgs", inserted, alerts)
 
+    station_payload = station.model_dump(mode="json")
     await broadcast(
         "station_registered",
-        {"station": station, "inserted_readings": inserted, "generated_alerts": alerts, "source": "api/usgs"},
+        {"station": station_payload, "inserted_readings": inserted, "generated_alerts": alerts, "source": "api/usgs"},
     )
 
     return {
         "status": "ok",
         "source": "api/usgs",
         "requested_by": user.get("sub"),
-        "station": station,
+        "station": station_payload,
         "inserted_readings": inserted,
         "generated_alerts": alerts,
     }

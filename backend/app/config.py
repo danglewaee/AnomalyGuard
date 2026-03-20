@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     kafka_topic_alerts: str = "anomaly-alerts"
     enable_kafka_publish: bool = False
 
+    enable_notifications: bool = True
+    enable_async_notifications: bool = False
+    enable_webhook_notifications: bool = False
+    notification_webhook_url: str = ""
+
     mlflow_tracking_uri: str = "file:./mlruns"
 
 
