@@ -17,6 +17,29 @@ STATION_PROFILES: dict[str, StationProfile] = {
         schools_nearby=18,
         critical_assets=["household intake points", "primary schools", "aquaculture ponds"],
         escalation_contacts=["district water operator", "commune health officer"],
+        notification_endpoints=[
+            {
+                "role": "duty-operator",
+                "channel": "email",
+                "address": "ops-cantho@example.org",
+                "label": "Can Tho duty operator",
+                "min_risk_level": "low",
+            },
+            {
+                "role": "public-health",
+                "channel": "sms",
+                "address": "+84900000001",
+                "label": "Can Tho commune health officer",
+                "min_risk_level": "high",
+            },
+            {
+                "role": "community-response",
+                "channel": "webhook",
+                "address": "https://example.org/hooks/cantho-community-response",
+                "label": "Can Tho response automation",
+                "min_risk_level": "critical",
+            },
+        ],
         exposure_notes="Dense riverside communities depend on surface water and small-scale treatment.",
     ),
     "saigon-thu-duc": StationProfile(
@@ -35,6 +58,29 @@ STATION_PROFILES: dict[str, StationProfile] = {
         schools_nearby=24,
         critical_assets=["municipal intake", "schools", "community clinics"],
         escalation_contacts=["city water utility shift lead", "district public health desk"],
+        notification_endpoints=[
+            {
+                "role": "duty-operator",
+                "channel": "email",
+                "address": "ops-thuduc@example.org",
+                "label": "Thu Duc utility shift lead",
+                "min_risk_level": "low",
+            },
+            {
+                "role": "public-health",
+                "channel": "sms",
+                "address": "+84900000002",
+                "label": "Thu Duc public health desk",
+                "min_risk_level": "high",
+            },
+            {
+                "role": "community-response",
+                "channel": "webhook",
+                "address": "https://example.org/hooks/thuduc-water-response",
+                "label": "Thu Duc response automation",
+                "min_risk_level": "critical",
+            },
+        ],
         exposure_notes="Urban households and schools depend on intake continuity and water quality stability.",
     ),
     "red-river-ha-noi": StationProfile(
@@ -53,6 +99,22 @@ STATION_PROFILES: dict[str, StationProfile] = {
         schools_nearby=12,
         critical_assets=["irrigation intakes", "residential supply points", "nearby schools"],
         escalation_contacts=["river operations desk", "ward disaster response lead"],
+        notification_endpoints=[
+            {
+                "role": "duty-operator",
+                "channel": "email",
+                "address": "ops-longbien@example.org",
+                "label": "Long Bien river operations desk",
+                "min_risk_level": "low",
+            },
+            {
+                "role": "public-health",
+                "channel": "sms",
+                "address": "+84900000003",
+                "label": "Long Bien ward response lead",
+                "min_risk_level": "high",
+            },
+        ],
         exposure_notes="Mixed residential and peri-urban agriculture exposure downstream of the monitoring point.",
     ),
 }

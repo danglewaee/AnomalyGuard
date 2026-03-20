@@ -27,6 +27,20 @@ class Settings(BaseSettings):
     enable_async_notifications: bool = False
     enable_webhook_notifications: bool = False
     notification_webhook_url: str = ""
+    notification_request_timeout_seconds: float = 5.0
+    smtp_notifications_enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    twilio_sms_enabled: bool = False
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from_phone: str = ""
+    twilio_api_base: str = "https://api.twilio.com/2010-04-01"
 
     mlflow_tracking_uri: str = "file:./mlruns"
 

@@ -31,7 +31,11 @@ from app.services.metrics import (
     READINGS_INGESTED,
 )
 from app.services.mlflow_logger import log_ingest_metrics
-from app.services.notification_pipeline import build_notification_plan, dispatch_notification_plan
+from app.services.notification_pipeline import (
+    NotificationDeliveryConfig,
+    build_notification_plan,
+    dispatch_notification_plan,
+)
 from app.services.risk_policy import build_community_alert, validate_status_transition
 from app.services.simulator import WaterReadingSimulator
 from app.services.stations import default_station_id, get_station, has_station, list_stations, register_station
@@ -107,6 +111,7 @@ def ensure_notification_table() -> None:
                     alert_id VARCHAR(64) NOT NULL,
                     station_id VARCHAR(128) NOT NULL,
                     channel VARCHAR(32) NOT NULL,
+                    target_role VARCHAR(64) NOT NULL DEFAULT 'system-log',
                     recipient VARCHAR(255) NOT NULL,
                     title VARCHAR(255) NOT NULL,
                     body TEXT NOT NULL,
@@ -118,6 +123,7 @@ def ensure_notification_table() -> None:
                 """
             )
         )
+        conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_role VARCHAR(64) NOT NULL DEFAULT 'system-log'"))
 
 
 def init_db() -> None:
@@ -193,8 +199,7 @@ def trigger_notifications(alert: AnomalyAlert, station: StationProfile) -> None:
 
         results = dispatch_notification_plan(
             notifications,
-            webhook_url=settings.notification_webhook_url,
-            enable_webhook=settings.enable_webhook_notifications,
+            config=_notification_delivery_config(),
         )
 
         for result in results:
@@ -209,6 +214,27 @@ def trigger_notifications(alert: AnomalyAlert, station: StationProfile) -> None:
                 NOTIFICATIONS_DELIVERED.labels(channel=channel).inc()
             else:
                 NOTIFICATIONS_FAILED.labels(channel=channel).inc()
+
+
+def _notification_delivery_config() -> NotificationDeliveryConfig:
+    return NotificationDeliveryConfig(
+        enable_webhook=settings.enable_webhook_notifications,
+        default_webhook_url=settings.notification_webhook_url,
+        smtp_enabled=settings.smtp_notifications_enabled,
+        smtp_host=settings.smtp_host,
+        smtp_port=settings.smtp_port,
+        smtp_username=settings.smtp_username,
+        smtp_password=settings.smtp_password,
+        smtp_from_email=settings.smtp_from_email,
+        smtp_use_tls=settings.smtp_use_tls,
+        smtp_use_ssl=settings.smtp_use_ssl,
+        twilio_enabled=settings.twilio_sms_enabled,
+        twilio_account_sid=settings.twilio_account_sid,
+        twilio_auth_token=settings.twilio_auth_token,
+        twilio_from_phone=settings.twilio_from_phone,
+        twilio_api_base=settings.twilio_api_base,
+        request_timeout_seconds=settings.notification_request_timeout_seconds,
+    )
 
 
 async def stream_loop() -> None:

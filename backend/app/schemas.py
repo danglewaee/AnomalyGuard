@@ -9,8 +9,18 @@ AlertSeverity = Literal["low", "medium", "high"]
 CommunityRiskLevel = Literal["low", "medium", "high", "critical"]
 AlertWorkflowStatus = Literal["new", "acknowledged", "investigating", "escalated", "resolved", "false_positive"]
 DataQualityFlag = Literal["simulated", "proxy-derived", "sensor", "external-feed", "uncertain"]
-NotificationChannel = Literal["ops-log", "duty-operator", "public-health", "webhook"]
+NotificationChannel = Literal["ops-log", "email", "sms", "webhook"]
+NotificationTargetRole = Literal["system-log", "duty-operator", "public-health", "community-response"]
 NotificationDeliveryStatus = Literal["queued", "delivered", "failed"]
+
+
+class NotificationEndpoint(BaseModel):
+    role: NotificationTargetRole
+    channel: Literal["email", "sms", "webhook"]
+    address: str
+    label: str = ""
+    min_risk_level: CommunityRiskLevel = "low"
+    active: bool = True
 
 
 class StationProfile(BaseModel):
@@ -29,6 +39,7 @@ class StationProfile(BaseModel):
     schools_nearby: int = 0
     critical_assets: List[str] = Field(default_factory=list)
     escalation_contacts: List[str] = Field(default_factory=list)
+    notification_endpoints: List[NotificationEndpoint] = Field(default_factory=list)
     exposure_notes: str = ""
 
 
@@ -76,6 +87,7 @@ class AlertNotification(BaseModel):
     alert_id: str
     station_id: str
     channel: NotificationChannel
+    target_role: NotificationTargetRole = "system-log"
     recipient: str
     title: str
     body: str

@@ -1,12 +1,18 @@
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from app.schemas import AnomalyAlert, StationProfile
-from app.services.notification_pipeline import build_notification_plan
+from app.services.notification_pipeline import (
+    NotificationDeliveryConfig,
+    NotificationDispatchResult,
+    build_notification_plan,
+    dispatch_notification_plan,
+)
 
 
 class NotificationPipelineTests(unittest.TestCase):
-    def test_builds_operator_and_public_health_notifications_for_high_risk(self) -> None:
+    def test_builds_real_channel_plan_for_high_risk(self) -> None:
         station = StationProfile(
             station_id="ang-giang-intake",
             station_name="An Giang Intake",
@@ -23,6 +29,29 @@ class NotificationPipelineTests(unittest.TestCase):
             schools_nearby=9,
             critical_assets=["school cluster", "intake gate"],
             escalation_contacts=["district water operator", "community health lead"],
+            notification_endpoints=[
+                {
+                    "role": "duty-operator",
+                    "channel": "email",
+                    "address": "ops@example.org",
+                    "label": "Duty operator",
+                    "min_risk_level": "low",
+                },
+                {
+                    "role": "public-health",
+                    "channel": "sms",
+                    "address": "+84900000001",
+                    "label": "Health lead",
+                    "min_risk_level": "high",
+                },
+                {
+                    "role": "community-response",
+                    "channel": "webhook",
+                    "address": "https://example.org/hooks/community",
+                    "label": "Response automation",
+                    "min_risk_level": "critical",
+                },
+            ],
             exposure_notes="Families rely on intake-fed treated water.",
         )
         alert = AnomalyAlert(
@@ -51,11 +80,15 @@ class NotificationPipelineTests(unittest.TestCase):
         plan = build_notification_plan(alert, station)
 
         channels = [item.channel for item in plan]
+        roles = [item.target_role for item in plan]
         self.assertEqual(channels[0], "ops-log")
-        self.assertIn("duty-operator", channels)
-        self.assertIn("public-health", channels)
+        self.assertEqual(roles[0], "system-log")
+        self.assertIn("email", channels)
+        self.assertIn("sms", channels)
+        self.assertIn("webhook", channels)
+        self.assertIn("public-health", roles)
 
-    def test_low_risk_plan_keeps_single_operator_contact(self) -> None:
+    def test_low_risk_plan_filters_high_threshold_routes(self) -> None:
         station = StationProfile(
             station_id="field-station",
             station_name="Field Station",
@@ -72,6 +105,22 @@ class NotificationPipelineTests(unittest.TestCase):
             schools_nearby=0,
             critical_assets=[],
             escalation_contacts=["canal operator"],
+            notification_endpoints=[
+                {
+                    "role": "duty-operator",
+                    "channel": "email",
+                    "address": "canal@example.org",
+                    "label": "Canal operator",
+                    "min_risk_level": "low",
+                },
+                {
+                    "role": "public-health",
+                    "channel": "sms",
+                    "address": "+84900000009",
+                    "label": "Health desk",
+                    "min_risk_level": "high",
+                },
+            ],
             exposure_notes="Irrigation only.",
         )
         alert = AnomalyAlert(
@@ -99,8 +148,111 @@ class NotificationPipelineTests(unittest.TestCase):
 
         plan = build_notification_plan(alert, station)
 
-        self.assertEqual(len(plan), 2)
-        self.assertEqual(plan[1].recipient, "canal operator")
+        channels = [item.channel for item in plan]
+        self.assertEqual(channels, ["ops-log", "email"])
+
+    def test_dispatch_routes_email_sms_and_webhook(self) -> None:
+        station = StationProfile(
+            station_id="route-test",
+            station_name="Route Test",
+            region="Can Tho",
+            timezone="Asia/Ho_Chi_Minh",
+            latitude=10.0,
+            longitude=105.8,
+            source="mqtt",
+        )
+        alert = AnomalyAlert(
+            id="alert-3",
+            timestamp=datetime.now(timezone.utc),
+            station_id=station.station_id,
+            severity="high",
+            score=0.77,
+            reasons=["tds outside safe range"],
+            feature_contributions={"tds": 2.8},
+        )
+        plan = [
+            *build_notification_plan(alert, station)[:1],
+            *[
+                item
+                for item in build_notification_plan(
+                    alert.model_copy(update={"community_risk_level": "critical"}),
+                    station.model_copy(
+                        update={
+                            "community_name": "Test community",
+                            "notification_endpoints": [
+                                {
+                                    "role": "duty-operator",
+                                    "channel": "email",
+                                    "address": "ops@example.org",
+                                },
+                                {
+                                    "role": "public-health",
+                                    "channel": "sms",
+                                    "address": "+84900000088",
+                                    "min_risk_level": "high",
+                                },
+                                {
+                                    "role": "community-response",
+                                    "channel": "webhook",
+                                    "address": "https://example.org/hooks/route-test",
+                                    "min_risk_level": "critical",
+                                },
+                            ],
+                        }
+                    ),
+                )[1:]
+            ],
+        ]
+
+        config = NotificationDeliveryConfig(
+            enable_webhook=True,
+            default_webhook_url="https://example.org/hooks/default",
+            smtp_enabled=True,
+            smtp_host="smtp.example.org",
+            smtp_port=587,
+            smtp_from_email="alerts@example.org",
+            twilio_enabled=True,
+            twilio_account_sid="sid",
+            twilio_auth_token="token",
+            twilio_from_phone="+12025550100",
+        )
+
+        with (
+            patch(
+                "app.services.notification_pipeline._dispatch_email",
+                return_value=NotificationDispatchResult(
+                    id=plan[1].id,
+                    delivery_status="delivered",
+                    delivery_detail="email ok",
+                    delivered_at=datetime.now(timezone.utc),
+                ),
+            ) as email_mock,
+            patch(
+                "app.services.notification_pipeline._dispatch_sms",
+                return_value=NotificationDispatchResult(
+                    id=plan[2].id,
+                    delivery_status="delivered",
+                    delivery_detail="sms ok",
+                    delivered_at=datetime.now(timezone.utc),
+                ),
+            ) as sms_mock,
+            patch(
+                "app.services.notification_pipeline._dispatch_webhook",
+                return_value=NotificationDispatchResult(
+                    id=plan[3].id,
+                    delivery_status="delivered",
+                    delivery_detail="webhook ok",
+                    delivered_at=datetime.now(timezone.utc),
+                ),
+            ) as webhook_mock,
+        ):
+            results = dispatch_notification_plan(plan, config)
+
+        self.assertEqual(len(results), 4)
+        email_mock.assert_called_once()
+        sms_mock.assert_called_once()
+        webhook_mock.assert_called_once()
+        self.assertEqual(results[0].delivery_status, "delivered")
 
 
 if __name__ == "__main__":

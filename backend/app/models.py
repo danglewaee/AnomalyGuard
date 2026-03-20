@@ -52,6 +52,7 @@ class NotificationRecord(Base):
     alert_id: Mapped[str] = mapped_column(String(64), index=True)
     station_id: Mapped[str] = mapped_column(String(128), index=True)
     channel: Mapped[str] = mapped_column(String(32), index=True)
+    target_role: Mapped[str] = mapped_column(String(64), index=True, default="system-log")
     recipient: Mapped[str] = mapped_column(String(255))
     title: Mapped[str] = mapped_column(String(255))
     body: Mapped[str] = mapped_column(Text)
