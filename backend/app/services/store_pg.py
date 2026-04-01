@@ -138,6 +138,33 @@ class PostgresStore:
         self.db.commit()
         return self.alert_with_incident(alert_id)
 
+    def set_alert_review(self, alert_id: str, label: str, reviewed_by: str, note: str = "") -> AnomalyAlert | None:
+        incident = self.db.get(IncidentRecord, alert_id)
+        if incident is None:
+            alert = self.db.get(AlertRecord, alert_id)
+            if alert is None:
+                return None
+            incident = IncidentRecord(
+                id=alert_id,
+                station_id=alert.station_id,
+                status="open",
+                created_at=alert.timestamp,
+                updated_at=alert.timestamp,
+                last_changed_by="system",
+                status_note="",
+            )
+            self.db.add(incident)
+
+        now = datetime.now(timezone.utc)
+        incident.review_label = label
+        incident.review_note = note
+        incident.reviewed_at = now
+        incident.reviewed_by = reviewed_by
+        incident.updated_at = now
+
+        self.db.commit()
+        return self.alert_with_incident(alert_id)
+
     def create_job(self, job_id: str, job_type: str, requested_by: str, parameters: dict | None = None) -> JobStatus:
         now = datetime.now(timezone.utc)
         row = JobRecord(
@@ -287,6 +314,10 @@ class PostgresStore:
             incident_status=incident.status if incident is not None else "open",
             incident_note=incident.status_note if incident is not None else "",
             incident_updated_at=incident.updated_at if incident is not None else None,
+            review_label=incident.review_label if incident is not None else None,
+            review_note=incident.review_note if incident is not None else "",
+            reviewed_at=incident.reviewed_at if incident is not None else None,
+            reviewed_by=incident.reviewed_by if incident is not None else "",
         )
 
     def _job_to_schema(self, row: JobRecord) -> JobStatus:

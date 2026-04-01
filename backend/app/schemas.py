@@ -36,9 +36,18 @@ class AnomalyAlert(BaseModel):
     incident_status: Literal["open", "acknowledged", "resolved"] | None = None
     incident_note: str | None = None
     incident_updated_at: datetime | None = None
+    review_label: Literal["true_anomaly", "false_positive"] | None = None
+    review_note: str | None = None
+    reviewed_at: datetime | None = None
+    reviewed_by: str | None = None
 
 
 class IncidentStatusUpdate(BaseModel):
+    note: str = ""
+
+
+class AlertReviewUpdate(BaseModel):
+    label: Literal["true_anomaly", "false_positive"]
     note: str = ""
 
 

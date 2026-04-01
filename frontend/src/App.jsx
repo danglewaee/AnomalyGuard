@@ -206,6 +206,11 @@ function App() {
         loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
       }
 
+      if (data.event === "alert_review") {
+        upsertAlert(data.payload);
+        loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
+      }
+
       if (data.event === "device_status") {
         upsertDeviceStatus(data.payload);
         loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
@@ -461,6 +466,41 @@ function App() {
     }
   };
 
+  const runAlertReview = async (alertId, label) => {
+    setIncidentMessage("");
+    if (!authToken) {
+      setIncidentMessage("Login admin first to review alerts.");
+      return;
+    }
+
+    setIncidentBusyId(alertId);
+    try {
+      const res = await fetch(`${API_BASE}/api/alerts/${alertId}/review`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ label, note: "" }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setIncidentMessage(body.detail || "Alert review failed");
+        return;
+      }
+
+      upsertAlert(body);
+      loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
+      setIncidentMessage(
+        label === "false_positive" ? `Marked ${body.station_id} as false positive.` : `Confirmed anomaly for ${body.station_id}.`
+      );
+    } catch {
+      setIncidentMessage("Cannot reach backend for alert review.");
+    } finally {
+      setIncidentBusyId("");
+    }
+  };
+
   const filteredReadings = useMemo(() => {
     if (stationId === "all") return readings;
     return readings.filter((reading) => reading.station_id === stationId);
@@ -561,6 +601,7 @@ function App() {
           chartData={chartData}
           filteredAlerts={filteredAlerts}
           onIncidentAction={runIncidentAction}
+          onReviewAction={runAlertReview}
           incidentBusyId={incidentBusyId}
           incidentMessage={incidentMessage}
         />

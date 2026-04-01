@@ -84,6 +84,8 @@ Incident workflow endpoints:
 - `POST /api/incidents/{alert_id}/acknowledge`
 - `POST /api/incidents/{alert_id}/resolve`
 - `POST /api/incidents/{alert_id}/reopen`
+- `POST /api/alerts/{alert_id}/review`
+  - body: `{"label":"true_anomaly"}` or `{"label":"false_positive"}`
 
 Job status endpoint:
 

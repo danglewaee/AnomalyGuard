@@ -14,7 +14,9 @@ if DEPS_ROOT.exists() and str(DEPS_ROOT) not in sys.path:
 
 import httpx
 
+from app.api.routes import alerts as alert_routes
 from app.api.routes import community as community_routes
+from app.api.routes import ingest as ingest_routes
 from app.api.routes import incidents as incident_routes
 from app.api.routes import jobs as jobs_routes
 import app.main as main
@@ -71,7 +73,7 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
 
         send_task = MagicMock()
 
-        with patch.object(main, "PostgresStore", FakeStore), patch.object(main.celery_app, "send_task", send_task):
+        with patch.object(ingest_routes, "PostgresStore", FakeStore), patch.object(ingest_routes.celery_app, "send_task", send_task):
             response = await self.client.post(
                 "/api/ingest/vn",
                 params={"station_id": "mekong-can-tho", "days": 7},
@@ -128,8 +130,8 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
                     error_message=error_message or "",
                 )
 
-        with patch.object(main, "PostgresStore", FakeStore), patch.object(
-            main.celery_app,
+        with patch.object(ingest_routes, "PostgresStore", FakeStore), patch.object(
+            ingest_routes.celery_app,
             "send_task",
             side_effect=RuntimeError("broker unavailable"),
         ):
@@ -264,6 +266,55 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["detail"], "Incident not found")
         broadcast.assert_not_awaited()
 
+    async def test_review_alert_marks_false_positive_and_broadcasts_review_event(self) -> None:
+        now = datetime.now(UTC)
+        updated_alert = AnomalyAlert(
+            id="alert-review",
+            timestamp=now - timedelta(minutes=7),
+            station_id="mekong-can-tho",
+            severity="low",
+            score=0.49,
+            reasons=["statistical deviation from recent baseline"],
+            feature_contributions={"tds": 1.2},
+            incident_status="open",
+            incident_note="",
+            incident_updated_at=now,
+            review_label="false_positive",
+            review_note="Sensor calibration drift",
+            reviewed_at=now,
+            reviewed_by="test-admin",
+        )
+        broadcast = AsyncMock()
+        review_calls: list[dict] = []
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def set_alert_review(self, alert_id: str, label: str, reviewed_by: str, note: str = "") -> AnomalyAlert:
+                review_calls.append(
+                    {
+                        "alert_id": alert_id,
+                        "label": label,
+                        "reviewed_by": reviewed_by,
+                        "note": note,
+                    }
+                )
+                return updated_alert
+
+        with patch.object(alert_routes, "PostgresStore", FakeStore), patch.object(alert_routes, "broadcast", broadcast):
+            response = await self.client.post(
+                "/api/alerts/alert-review/review",
+                json={"label": "false_positive", "note": "Sensor calibration drift"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["review_label"], "false_positive")
+        self.assertEqual(review_calls[0]["reviewed_by"], "test-admin")
+        broadcast.assert_awaited_once()
+        self.assertEqual(broadcast.await_args.args[0], "alert_review")
+
     async def test_community_overview_filters_resolved_alerts_and_uses_selected_profile(self) -> None:
         now = datetime.now(UTC)
         stations = [
@@ -313,6 +364,22 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
                 incident_status="resolved",
                 incident_note="Resolved",
                 incident_updated_at=now - timedelta(minutes=2),
+            ),
+            AnomalyAlert(
+                id="alert-false-positive",
+                timestamp=now - timedelta(minutes=6),
+                station_id="river-01",
+                severity="high",
+                score=0.82,
+                reasons=["ph outside safe range"],
+                feature_contributions={"ph": 2.1},
+                incident_status="open",
+                incident_note="",
+                incident_updated_at=now - timedelta(minutes=1),
+                review_label="false_positive",
+                review_note="Probe maintenance window",
+                reviewed_at=now - timedelta(minutes=1),
+                reviewed_by="test-admin",
             ),
         ]
 

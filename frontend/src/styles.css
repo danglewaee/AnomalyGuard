@@ -439,6 +439,27 @@ h3 {
   margin-top: 10px;
 }
 
+.reviewBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.review-true_anomaly {
+  background: #dff7ee;
+  color: #0f7b56;
+}
+
+.review-false_positive {
+  background: #eef2f7;
+  color: #486078;
+}
+
 .inlineButton {
   border: 0;
   border-radius: 999px;
@@ -456,6 +477,15 @@ h3 {
 .inlineButton.ghost {
   background: #eef4f8;
   color: #35506a;
+}
+
+.inlineButton.subtle {
+  background: #e9f3ea;
+  color: #116149;
+}
+
+.inlineButton.selected {
+  box-shadow: inset 0 0 0 2px rgba(16, 62, 117, 0.18);
 }
 
 .inlineButton:disabled {

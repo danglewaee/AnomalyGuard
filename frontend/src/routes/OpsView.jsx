@@ -48,6 +48,7 @@ function OpsView({
   chartData,
   filteredAlerts,
   onIncidentAction,
+  onReviewAction,
   incidentBusyId,
   incidentMessage,
 }) {
@@ -256,6 +257,7 @@ function OpsView({
             {filteredAlerts.map((alert) => {
               const incidentStatus = alert.incident_status || "open";
               const isBusy = incidentBusyId === alert.id;
+              const reviewLabel = alert.review_label || "";
 
               return (
                 <div key={alert.id} className={`alertItem sev-${alert.severity}`}>
@@ -273,7 +275,14 @@ function OpsView({
                     <span className={`incidentBadge incident-${incidentStatus}`}>{incidentStatus}</span>
                     <span className="muted tiny">{formatTimestamp(alert.incident_updated_at || alert.timestamp)}</span>
                   </div>
+                  {reviewLabel ? (
+                    <div className="incidentMetaRow">
+                      <span className={`reviewBadge review-${reviewLabel}`}>{reviewLabel === "true_anomaly" ? "true anomaly" : "false positive"}</span>
+                      <span className="muted tiny">{formatTimestamp(alert.reviewed_at || alert.timestamp)}</span>
+                    </div>
+                  ) : null}
                   {alert.incident_note ? <div className="muted tiny">{alert.incident_note}</div> : null}
+                  {alert.review_note ? <div className="muted tiny">{alert.review_note}</div> : null}
                   <div className="incidentActions">
                     {incidentStatus === "open" ? (
                       <button className="inlineButton" onClick={() => onIncidentAction(alert.id, "acknowledge")} disabled={isBusy || !authToken}>
@@ -290,6 +299,20 @@ function OpsView({
                         {isBusy ? "Updating..." : "Reopen"}
                       </button>
                     ) : null}
+                    <button
+                      className={`inlineButton subtle ${reviewLabel === "true_anomaly" ? "selected" : ""}`}
+                      onClick={() => onReviewAction(alert.id, "true_anomaly")}
+                      disabled={isBusy || !authToken}
+                    >
+                      {isBusy && reviewLabel !== "true_anomaly" ? "Updating..." : "True Anomaly"}
+                    </button>
+                    <button
+                      className={`inlineButton ghost ${reviewLabel === "false_positive" ? "selected" : ""}`}
+                      onClick={() => onReviewAction(alert.id, "false_positive")}
+                      disabled={isBusy || !authToken}
+                    >
+                      {isBusy && reviewLabel !== "false_positive" ? "Updating..." : "False Positive"}
+                    </button>
                   </div>
                 </div>
               );

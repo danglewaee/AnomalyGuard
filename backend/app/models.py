@@ -46,6 +46,10 @@ class IncidentRecord(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_changed_by: Mapped[str] = mapped_column(String(128), default="")
     status_note: Mapped[str] = mapped_column(Text, default="")
+    review_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    review_note: Mapped[str] = mapped_column(Text, default="")
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[str] = mapped_column(String(128), default="")
 
 
 class JobRecord(Base):

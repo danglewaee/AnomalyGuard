@@ -134,7 +134,9 @@ def build_community_overview(
     impact_profile_key: str | None = None,
 ) -> CommunityOverview:
     resolved_profile_key, impact_profile = load_community_impact_profile(impact_profile_key)
-    active_alerts = [alert for alert in alerts if alert.incident_status != "resolved"]
+    active_alerts = [
+        alert for alert in alerts if alert.incident_status != "resolved" and alert.review_label != "false_positive"
+    ]
     station_lookup = {station.station_id: station for station in stations}
     zones: dict[str, dict] = {}
 
