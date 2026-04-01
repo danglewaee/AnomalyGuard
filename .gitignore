@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+backend/.deps/
 
 # Node
 node_modules/

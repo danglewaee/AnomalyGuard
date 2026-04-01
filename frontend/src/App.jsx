@@ -1,31 +1,38 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
-const API_BASE = "http://localhost:8000";
-const WS_URL = "ws://localhost:8000/ws/stream";
+import { API_BASE, WS_URL } from "./config.js";
+import { EMPTY_DEVICE_CONTROL } from "./constants.js";
+import CommunityView from "./routes/CommunityView.jsx";
+import OpsView from "./routes/OpsView.jsx";
 
-const VN_STATIONS = [
-  { id: "mekong-can-tho", label: "Can Tho (Mekong)" },
-  { id: "saigon-thu-duc", label: "Thu Duc (Saigon River)" },
-  { id: "red-river-ha-noi", label: "Long Bien (Red River)" },
-];
+const OPS_PATH = "/ops";
+const COMMUNITY_PATH = "/community";
+
+function currentPathname() {
+  if (typeof window === "undefined") return OPS_PATH;
+  return window.location.pathname || OPS_PATH;
+}
+
+function normalizeRoute(pathname) {
+  return pathname.startsWith(COMMUNITY_PATH) ? COMMUNITY_PATH : OPS_PATH;
+}
 
 function App() {
+  const [route, setRoute] = useState(() => normalizeRoute(currentPathname()));
+
   const [readings, setReadings] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [stations, setStations] = useState([]);
+  const [deviceStatuses, setDeviceStatuses] = useState([]);
   const [meta, setMeta] = useState(null);
+  const [communityOverview, setCommunityOverview] = useState(null);
+  const [communityImpactProfiles, setCommunityImpactProfiles] = useState([]);
+  const [communityImpactProfile, setCommunityImpactProfile] = useState("");
   const [connected, setConnected] = useState(false);
+
   const [stationId, setStationId] = useState("all");
   const [sinceMinutes, setSinceMinutes] = useState(180);
+  const [communitySinceMinutes, setCommunitySinceMinutes] = useState(720);
   const [vnIngestStation, setVnIngestStation] = useState("mekong-can-tho");
   const [ingestMessage, setIngestMessage] = useState("");
   const [ingesting, setIngesting] = useState(false);
@@ -34,6 +41,55 @@ function App() {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin123");
   const [authMessage, setAuthMessage] = useState("");
+
+  const [deviceStationId, setDeviceStationId] = useState("");
+  const [deviceControl, setDeviceControl] = useState(EMPTY_DEVICE_CONTROL);
+  const [deviceMessage, setDeviceMessage] = useState("");
+  const [controlBusy, setControlBusy] = useState(false);
+  const [controlDirty, setControlDirty] = useState(false);
+  const [incidentBusyId, setIncidentBusyId] = useState("");
+  const [incidentMessage, setIncidentMessage] = useState("");
+
+  const navigate = useCallback((nextRoute) => {
+    const normalized = normalizeRoute(nextRoute);
+    if (typeof window !== "undefined" && currentPathname() !== normalized) {
+      window.history.pushState({}, "", normalized);
+    }
+    setRoute(normalized);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    if (window.location.pathname === "/" || window.location.pathname === "") {
+      window.history.replaceState({}, "", OPS_PATH);
+      setRoute(OPS_PATH);
+    }
+
+    const onPopState = () => setRoute(normalizeRoute(currentPathname()));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const upsertDeviceStatus = useCallback((incoming) => {
+    setDeviceStatuses((previous) => {
+      const next = [incoming, ...previous.filter((item) => item.station_id !== incoming.station_id)];
+      next.sort((left, right) => {
+        const leftTime = left.last_seen_at ? new Date(left.last_seen_at).getTime() : 0;
+        const rightTime = right.last_seen_at ? new Date(right.last_seen_at).getTime() : 0;
+        return rightTime - leftTime;
+      });
+      return next;
+    });
+  }, []);
+
+  const upsertAlert = useCallback((incoming) => {
+    setAlerts((previous) => {
+      const next = [incoming, ...previous.filter((item) => item.id !== incoming.id)];
+      next.sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime());
+      return next.slice(0, 150);
+    });
+  }, []);
 
   const loadSnapshot = useCallback((selectedStation, selectedWindow) => {
     const stationParam = selectedStation === "all" ? "" : `&station_id=${selectedStation}`;
@@ -57,11 +113,54 @@ function App() {
       .then((res) => res.json())
       .then((data) => setAlerts(data))
       .catch(() => {});
+
+    fetch(`${API_BASE}/api/device/status`)
+      .then((res) => res.json())
+      .then((data) => setDeviceStatuses(data))
+      .catch(() => {});
+  }, []);
+
+  const loadCommunityProfiles = useCallback(() => {
+    fetch(`${API_BASE}/api/community/impact-profiles`)
+      .then((res) => res.json())
+      .then((data) => {
+        const profiles = data.profiles || [];
+        setCommunityImpactProfiles(profiles);
+        setCommunityImpactProfile((previous) => {
+          if (previous && profiles.some((item) => item.key === previous)) {
+            return previous;
+          }
+          return data.active_profile || profiles[0]?.key || "";
+        });
+      })
+      .catch(() => {});
+  }, []);
+
+  const loadCommunityOverview = useCallback((selectedWindow, selectedProfile = "") => {
+    const params = new URLSearchParams({ since_minutes: String(selectedWindow) });
+    if (selectedProfile) {
+      params.set("impact_profile", selectedProfile);
+    }
+
+    fetch(`${API_BASE}/api/community/overview?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => setCommunityOverview(data))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
     loadSnapshot(stationId, sinceMinutes);
+  }, [loadSnapshot, sinceMinutes, stationId]);
 
+  useEffect(() => {
+    loadCommunityProfiles();
+  }, [loadCommunityProfiles]);
+
+  useEffect(() => {
+    loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
+  }, [communityImpactProfile, communitySinceMinutes, loadCommunityOverview]);
+
+  useEffect(() => {
     const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => setConnected(true);
@@ -76,19 +175,49 @@ function App() {
         setMeta(data.payload.meta || null);
         setReadings(data.payload.readings || []);
         setAlerts(data.payload.alerts || []);
+        setDeviceStatuses(data.payload.device_statuses || []);
+        loadCommunityProfiles();
+        loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
       }
 
       if (data.event === "station_registered") {
         setIngestMessage(`Ingested ${data.payload.inserted_readings} readings from ${data.payload.station.station_name}`);
         loadSnapshot(stationId, sinceMinutes);
+        loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
+      }
+
+      if (data.event === "stations_updated") {
+        setStations(data.payload.stations || []);
+        loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
       }
 
       if (data.event === "reading") {
-        setReadings((prev) => [...prev.slice(-399), data.payload]);
+        setReadings((previous) => [...previous.slice(-399), data.payload]);
       }
 
       if (data.event === "alert") {
-        setAlerts((prev) => [data.payload, ...prev].slice(0, 150));
+        upsertAlert(data.payload);
+        setIncidentMessage("");
+        loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
+      }
+
+      if (data.event === "incident_status") {
+        upsertAlert(data.payload);
+        loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
+      }
+
+      if (data.event === "device_status") {
+        upsertDeviceStatus(data.payload);
+        loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
+      }
+
+      if (data.event === "device_control") {
+        upsertDeviceStatus(data.payload);
+        if (data.payload.station_id === deviceStationId) {
+          setDeviceControl({ ...EMPTY_DEVICE_CONTROL, ...data.payload.control });
+          setControlDirty(false);
+          setDeviceMessage(`Control pushed to ${data.payload.station_name}`);
+        }
       }
     };
 
@@ -102,11 +231,52 @@ function App() {
       clearInterval(heartbeat);
       ws.close();
     };
-  }, [loadSnapshot]);
+  }, [
+    communityImpactProfile,
+    communitySinceMinutes,
+    deviceStationId,
+    loadCommunityOverview,
+    loadCommunityProfiles,
+    loadSnapshot,
+    sinceMinutes,
+    stationId,
+    upsertAlert,
+    upsertDeviceStatus,
+  ]);
+
+  const deviceStations = useMemo(() => stations.filter((station) => station.source === "device"), [stations]);
 
   useEffect(() => {
-    loadSnapshot(stationId, sinceMinutes);
-  }, [stationId, sinceMinutes, loadSnapshot]);
+    if (stationId !== "all") {
+      const selected = stations.find((station) => station.station_id === stationId && station.source === "device");
+      if (selected && selected.station_id !== deviceStationId) {
+        setDeviceStationId(selected.station_id);
+        setControlDirty(false);
+        return;
+      }
+    }
+
+    if (!deviceStationId && deviceStations.length > 0) {
+      setDeviceStationId(deviceStations[0].station_id);
+      setControlDirty(false);
+      return;
+    }
+
+    if (deviceStationId && !deviceStations.some((station) => station.station_id === deviceStationId)) {
+      setDeviceStationId(deviceStations[0]?.station_id || "");
+      setControlDirty(false);
+    }
+  }, [deviceStationId, deviceStations, stationId, stations]);
+
+  const selectedDeviceStatus = useMemo(
+    () => deviceStatuses.find((item) => item.station_id === deviceStationId) || null,
+    [deviceStatuses, deviceStationId]
+  );
+
+  useEffect(() => {
+    if (!selectedDeviceStatus || controlDirty) return;
+    setDeviceControl({ ...EMPTY_DEVICE_CONTROL, ...selectedDeviceStatus.control });
+  }, [controlDirty, selectedDeviceStatus]);
 
   const runLogin = async () => {
     setAuthMessage("");
@@ -149,11 +319,61 @@ function App() {
       if (!res.ok) {
         setIngestMessage(body.detail || "VN ingest failed");
       } else {
-        setIngestMessage(
-          `VN ingest success: ${body.inserted_readings} readings, ${body.generated_alerts} alerts (${body.station.station_id})`
-        );
-        setStationId(body.station.station_id);
-        loadSnapshot(body.station.station_id, sinceMinutes);
+        const jobId = body.id;
+        let jobFinished = false;
+        setIngestMessage(`VN ingest job queued (${jobId}). Waiting for worker result...`);
+
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+
+          const jobRes = await fetch(`${API_BASE}/api/jobs/${jobId}`, {
+            headers: { Authorization: `Bearer ${authToken}` },
+          });
+          const jobBody = await jobRes.json();
+          if (!jobRes.ok) {
+            setIngestMessage(jobBody.detail || "Cannot read ingest job status.");
+            break;
+          }
+
+          if (jobBody.status === "queued") {
+            setIngestMessage(`VN ingest job queued (${jobId}).`);
+            continue;
+          }
+
+          if (jobBody.status === "running") {
+            setIngestMessage(`VN ingest job running (${jobId})...`);
+            continue;
+          }
+
+          if (jobBody.status === "failed") {
+            setIngestMessage(jobBody.error_message || "VN ingest job failed.");
+            jobFinished = true;
+            break;
+          }
+
+          if (jobBody.status === "succeeded") {
+            const result = jobBody.result_payload || {};
+            const station = result.station || null;
+            if (station?.station_id) {
+              setStationId(station.station_id);
+              loadSnapshot(station.station_id, sinceMinutes);
+            } else {
+              loadSnapshot(stationId, sinceMinutes);
+            }
+            loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
+            setIngestMessage(
+              `VN ingest success: ${result.inserted_readings || 0} readings, ${result.generated_alerts || 0} alerts${
+                station?.station_id ? ` (${station.station_id})` : ""
+              }`
+            );
+            jobFinished = true;
+            break;
+          }
+        }
+
+        if (!jobFinished) {
+          setIngestMessage(`VN ingest job still running (${jobId}). Check again shortly.`);
+        }
       }
     } catch {
       setIngestMessage("Cannot reach backend or Open-Meteo endpoint.");
@@ -162,151 +382,189 @@ function App() {
     }
   };
 
+  const updateDeviceControl = useCallback((patch) => {
+    setControlDirty(true);
+    setDeviceControl((previous) => ({ ...previous, ...patch }));
+  }, []);
+
+  const runDeviceControl = async () => {
+    setDeviceMessage("");
+    if (!authToken) {
+      setDeviceMessage("Login admin first to push device control.");
+      return;
+    }
+    if (!deviceStationId) {
+      setDeviceMessage("No device station available yet.");
+      return;
+    }
+
+    setControlBusy(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/device/control/${deviceStationId}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(deviceControl),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setDeviceMessage(body.detail || "Device control update failed");
+      } else {
+        setDeviceControl({ ...EMPTY_DEVICE_CONTROL, ...body.control });
+        setControlDirty(false);
+        setDeviceMessage(`Control updated for ${deviceStationId}`);
+      }
+    } catch {
+      setDeviceMessage("Cannot reach backend for device control.");
+    } finally {
+      setControlBusy(false);
+    }
+  };
+
+  const runIncidentAction = async (alertId, action) => {
+    setIncidentMessage("");
+    if (!authToken) {
+      setIncidentMessage("Login admin first to update incident state.");
+      return;
+    }
+
+    setIncidentBusyId(alertId);
+    try {
+      const res = await fetch(`${API_BASE}/api/incidents/${alertId}/${action}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ note: "" }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setIncidentMessage(body.detail || "Incident update failed");
+        return;
+      }
+
+      const actionCopy = {
+        acknowledge: "acknowledged",
+        resolve: "resolved",
+        reopen: "reopened",
+      };
+      upsertAlert(body);
+      loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
+      setIncidentMessage(`Incident ${actionCopy[action] || "updated"} for ${body.station_id}.`);
+    } catch {
+      setIncidentMessage("Cannot reach backend for incident update.");
+    } finally {
+      setIncidentBusyId("");
+    }
+  };
+
   const filteredReadings = useMemo(() => {
     if (stationId === "all") return readings;
-    return readings.filter((r) => r.station_id === stationId);
+    return readings.filter((reading) => reading.station_id === stationId);
   }, [readings, stationId]);
 
   const filteredAlerts = useMemo(() => {
     if (stationId === "all") return alerts;
-    return alerts.filter((a) => a.station_id === stationId);
+    return alerts.filter((alert) => alert.station_id === stationId);
   }, [alerts, stationId]);
 
   const latest = filteredReadings[filteredReadings.length - 1];
-
   const chartData = useMemo(
     () =>
-      filteredReadings.map((r) => ({
-        t: new Date(r.timestamp).toLocaleTimeString(),
-        turbidity: r.turbidity,
-        tds: r.tds,
-        ph: r.ph,
+      filteredReadings.map((reading) => ({
+        t: new Date(reading.timestamp).toLocaleTimeString(),
+        turbidity: reading.turbidity,
+        tds: reading.tds,
+        ph: reading.ph,
       })),
     [filteredReadings]
   );
 
+  const selectedTelemetry = selectedDeviceStatus?.telemetry || {};
+  const inferredFields = selectedTelemetry.inferred_fields || [];
+  const deviceLastSeen = selectedDeviceStatus?.last_seen_at
+    ? new Date(selectedDeviceStatus.last_seen_at).toLocaleString()
+    : "No telemetry yet";
+
   return (
-    <div className="layout">
-      <header className="header">
-        <h1>AnomalyGuard - Water Pollution Platform</h1>
-        <span className={connected ? "badge ok" : "badge err"}>{connected ? "Realtime Connected" : "Disconnected"}</span>
+    <div className="shell">
+      <header className="shellHeader">
+        <div>
+          <p className="eyebrow">AnomalyGuard</p>
+          <h1 className="shellTitle">Water Risk Intelligence</h1>
+        </div>
+        <div className="headerActions">
+          <nav className="routeNav" aria-label="Primary">
+            <button className={route === OPS_PATH ? "routeButton active" : "routeButton"} onClick={() => navigate(OPS_PATH)}>
+              Ops View
+            </button>
+            <button
+              className={route === COMMUNITY_PATH ? "routeButton active" : "routeButton"}
+              onClick={() => navigate(COMMUNITY_PATH)}
+            >
+              Community View
+            </button>
+          </nav>
+          <span className={connected ? "badge ok" : "badge err"}>{connected ? "Realtime Connected" : "Disconnected"}</span>
+        </div>
       </header>
 
-      <section className="panel authPanel">
-        <div>
-          <label htmlFor="username">Admin User</label>
-          <input id="username" value={username} onChange={(e) => setUsername(e.target.value)} />
-        </div>
-        <div>
-          <label htmlFor="password">Password</label>
-          <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </div>
-        <button onClick={runLogin}>Login</button>
-        <div className="muted tiny">{authMessage || "Required for ingest/stream controls."}</div>
-      </section>
-
-      <section className="panel controls">
-        <div>
-          <label htmlFor="station">Station</label>
-          <select id="station" value={stationId} onChange={(e) => setStationId(e.target.value)}>
-            <option value="all">All Stations</option>
-            {stations.map((s) => (
-              <option key={s.station_id} value={s.station_id}>
-                {s.station_name} ({s.region})
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label htmlFor="window">Time Window</label>
-          <select id="window" value={sinceMinutes} onChange={(e) => setSinceMinutes(Number(e.target.value))}>
-            <option value={60}>Last 60 minutes</option>
-            <option value={180}>Last 3 hours</option>
-            <option value={720}>Last 12 hours</option>
-            <option value={1440}>Last 24 hours</option>
-            <option value={4320}>Last 3 days</option>
-            <option value={10080}>Last 7 days</option>
-          </select>
-        </div>
-        <div className="metaBlock">
-          <strong>Data Source:</strong> {meta?.data_source || "-"}
-          <br />
-          <strong>Time Context:</strong> {meta?.timezone || "-"}
-          <br />
-          <strong>Note:</strong> {meta?.last_ingest_note || "-"}
-        </div>
-      </section>
-
-      <section className="panel ingestPanel">
-        <div>
-          <label htmlFor="vnStation">VN Station (Real Feed)</label>
-          <select id="vnStation" value={vnIngestStation} onChange={(e) => setVnIngestStation(e.target.value)}>
-            {VN_STATIONS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button onClick={runVNIngest} disabled={ingesting || !authToken}>
-          {ingesting ? "Ingesting..." : "Ingest VN Real Data"}
-        </button>
-        <div className="muted tiny">{ingestMessage || "Uses Open-Meteo flood/weather data at VN coordinates for the last 30 days."}</div>
-      </section>
-
-      <section className="cards">
-        <Metric title="pH" value={latest ? latest.ph : "-"} />
-        <Metric title="TDS" value={latest ? `${latest.tds} ppm` : "-"} />
-        <Metric title="Turbidity" value={latest ? `${latest.turbidity} NTU` : "-"} />
-        <Metric title="DO" value={latest ? `${latest.do_mg_l} mg/L` : "-"} />
-      </section>
-
-      <section className="grid">
-        <div className="panel">
-          <h2>Water Signals</h2>
-          <div className="chartWrap">
-            <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="t" hide />
-                <YAxis />
-                <Tooltip />
-                <Line type="monotone" dataKey="turbidity" stroke="#d64545" dot={false} />
-                <Line type="monotone" dataKey="tds" stroke="#1d6fd4" dot={false} />
-                <Line type="monotone" dataKey="ph" stroke="#24937e" dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="panel">
-          <h2>Recent Alerts</h2>
-          <div className="alerts">
-            {filteredAlerts.length === 0 && <p className="muted">No anomalies in selected scope.</p>}
-            {filteredAlerts.map((a) => (
-              <div key={a.id} className={`alertItem sev-${a.severity}`}>
-                <div className="alertHead">
-                  <strong>{a.severity.toUpperCase()}</strong>
-                  <span>score: {a.score}</span>
-                </div>
-                <div className="alertReasons">{(a.reasons || []).join(", ") || "anomalous pattern"}</div>
-                <div className="muted tiny">
-                  {new Date(a.timestamp).toLocaleString()} - {a.station_id}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function Metric({ title, value }) {
-  return (
-    <div className="card">
-      <p>{title}</p>
-      <strong>{value}</strong>
+      {route === COMMUNITY_PATH ? (
+        <CommunityView
+          communityOverview={communityOverview}
+          communityImpactProfiles={communityImpactProfiles}
+          communityImpactProfile={communityImpactProfile}
+          communitySinceMinutes={communitySinceMinutes}
+          onCommunityImpactProfileChange={setCommunityImpactProfile}
+          onCommunityWindowChange={setCommunitySinceMinutes}
+        />
+      ) : (
+        <OpsView
+          connected={connected}
+          meta={meta}
+          username={username}
+          password={password}
+          authMessage={authMessage}
+          onUsernameChange={setUsername}
+          onPasswordChange={setPassword}
+          onLogin={runLogin}
+          stations={stations}
+          stationId={stationId}
+          onStationChange={setStationId}
+          sinceMinutes={sinceMinutes}
+          onSinceMinutesChange={setSinceMinutes}
+          vnIngestStation={vnIngestStation}
+          onVnStationChange={setVnIngestStation}
+          onRunIngest={runVNIngest}
+          ingesting={ingesting}
+          ingestMessage={ingestMessage}
+          authToken={authToken}
+          deviceStations={deviceStations}
+          deviceStationId={deviceStationId}
+          onDeviceStationChange={(nextStationId) => {
+            setDeviceStationId(nextStationId);
+            setControlDirty(false);
+          }}
+          selectedDeviceStatus={selectedDeviceStatus}
+          selectedTelemetry={selectedTelemetry}
+          deviceLastSeen={deviceLastSeen}
+          inferredFields={inferredFields}
+          deviceControl={deviceControl}
+          onDeviceControlPatch={updateDeviceControl}
+          onRunDeviceControl={runDeviceControl}
+          controlBusy={controlBusy}
+          deviceMessage={deviceMessage}
+          latest={latest}
+          chartData={chartData}
+          filteredAlerts={filteredAlerts}
+          onIncidentAction={runIncidentAction}
+          incidentBusyId={incidentBusyId}
+          incidentMessage={incidentMessage}
+        />
+      )}
     </div>
   );
 }

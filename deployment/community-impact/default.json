@@ -1,0 +1,36 @@
+{
+  "display_name": "Default Community Profile",
+  "description": "Balanced public-safe messaging for general downstream communities and shared water-dependent sites.",
+  "corridor_template": "communities and water-dependent sites connected to {region}",
+  "base_impacted_groups": [
+    "Households",
+    "Schools and care sites",
+    "Water-dependent livelihoods"
+  ],
+  "base_priority_sites": [
+    "Untreated intake points",
+    "Schools and clinics",
+    "Storage and refill points"
+  ],
+  "default_impact_copy": "Operators should keep updates focused on untreated intake, public-service sites, and water-dependent livelihoods.",
+  "signal_rules": [
+    {
+      "match_any": ["turbidity"],
+      "impacted_groups": ["Treatment teams"],
+      "priority_sites": ["Raw intake lines", "Settling or filtration stages"],
+      "impact_copy": "Cloudier water can affect untreated intake, storage systems, and raw exchange points quickly."
+    },
+    {
+      "match_any": ["do_mg_l", "oxygen"],
+      "impacted_groups": ["Aquaculture operators"],
+      "priority_sites": ["Ponds and aeration-dependent sites"],
+      "impact_copy": "Oxygen stress can hit aquaculture sites and other water-dependent operations before households notice visible change."
+    },
+    {
+      "match_any": ["ph", "tds"],
+      "impacted_groups": ["Food preparation and clinic teams"],
+      "priority_sites": ["Clinic kitchens", "Food preparation areas"],
+      "impact_copy": "Rapid water chemistry shifts can make untreated water harder to use safely for direct intake and food preparation."
+    }
+  ]
+}

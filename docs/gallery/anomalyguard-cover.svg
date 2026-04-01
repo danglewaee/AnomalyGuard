@@ -1,0 +1,50 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1600" y2="900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071826"/>
+      <stop offset="1" stop-color="#113757"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#2CC7D9"/>
+      <stop offset="1" stop-color="#1A8BE8"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="900" rx="28" fill="url(#bg)"/>
+  <circle cx="210" cy="170" r="210" fill="#14D3A0" fill-opacity="0.07"/>
+  <circle cx="1360" cy="760" r="250" fill="#4AA8F3" fill-opacity="0.07"/>
+
+  <text x="120" y="136" fill="#8FD5E8" font-family="Segoe UI, Arial, sans-serif" font-size="24" letter-spacing="4">AI WATER MONITORING PLATFORM</text>
+  <text x="120" y="262" fill="#F7FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="92" font-weight="700">AnomalyGuard</text>
+  <text x="120" y="344" fill="#CFE1F1" font-family="Segoe UI, Arial, sans-serif" font-size="34">Clean, realtime monitoring</text>
+  <text x="120" y="390" fill="#CFE1F1" font-family="Segoe UI, Arial, sans-serif" font-size="34">for water anomalies and signal shifts.</text>
+
+  <rect x="940" y="120" width="500" height="660" rx="34" fill="#F7FBFF"/>
+  <rect x="978" y="162" width="424" height="64" rx="20" fill="#10243A"/>
+  <text x="1014" y="203" fill="#F7FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="700">Water Signals</text>
+
+  <rect x="978" y="258" width="124" height="88" rx="22" fill="#F9FCFF" stroke="#D8E6F1"/>
+  <text x="1002" y="293" fill="#677F98" font-family="Segoe UI, Arial, sans-serif" font-size="18">pH</text>
+  <text x="1002" y="334" fill="#10243A" font-family="Segoe UI, Arial, sans-serif" font-size="36" font-weight="700">7.18</text>
+
+  <rect x="1128" y="258" width="124" height="88" rx="22" fill="#F9FCFF" stroke="#D8E6F1"/>
+  <text x="1152" y="293" fill="#677F98" font-family="Segoe UI, Arial, sans-serif" font-size="18">TDS</text>
+  <text x="1152" y="334" fill="#10243A" font-family="Segoe UI, Arial, sans-serif" font-size="36" font-weight="700">422</text>
+
+  <rect x="1278" y="258" width="124" height="88" rx="22" fill="#F9FCFF" stroke="#D8E6F1"/>
+  <text x="1302" y="293" fill="#677F98" font-family="Segoe UI, Arial, sans-serif" font-size="18">NTU</text>
+  <text x="1302" y="334" fill="#C53A3A" font-family="Segoe UI, Arial, sans-serif" font-size="36" font-weight="700">8.9</text>
+
+  <line x1="998" y1="692" x2="1386" y2="692" stroke="#D8E6F1" stroke-width="2"/>
+  <line x1="998" y1="404" x2="998" y2="692" stroke="#D8E6F1" stroke-width="2"/>
+  <line x1="998" y1="596" x2="1386" y2="596" stroke="#EDF4F9" stroke-width="2"/>
+  <line x1="998" y1="500" x2="1386" y2="500" stroke="#EDF4F9" stroke-width="2"/>
+
+  <path d="M1018 628C1070 608 1102 566 1150 578C1198 590 1230 654 1282 614C1322 582 1354 518 1382 486" fill="none" stroke="#E25555" stroke-width="8" stroke-linecap="round"/>
+  <path d="M1018 594C1072 584 1106 556 1154 566C1204 576 1242 606 1292 594C1330 584 1358 570 1382 576" fill="none" stroke="#1B8FE7" stroke-width="8" stroke-linecap="round"/>
+  <path d="M1018 560C1070 546 1104 506 1156 522C1202 536 1236 600 1286 590C1322 582 1354 532 1382 548" fill="none" stroke="#16B38F" stroke-width="8" stroke-linecap="round"/>
+
+  <circle cx="1018" cy="628" r="7" fill="#E25555"/>
+  <circle cx="1150" cy="578" r="7" fill="#E25555"/>
+  <circle cx="1382" cy="486" r="7" fill="#E25555"/>
+</svg>

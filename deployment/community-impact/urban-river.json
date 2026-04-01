@@ -1,0 +1,36 @@
+{
+  "display_name": "Urban River",
+  "description": "Best for city waterways with clinics, schools, refill points, and treatment-heavy public infrastructure.",
+  "corridor_template": "urban neighborhoods, public facilities, and service sites connected to {region}",
+  "base_impacted_groups": [
+    "Households",
+    "Schools and care sites",
+    "Urban service operators"
+  ],
+  "base_priority_sites": [
+    "Untreated intake points",
+    "Clinics and schools",
+    "Public refill and storage points"
+  ],
+  "default_impact_copy": "Operators should keep updates focused on untreated intake, service continuity, and public-facing facilities.",
+  "signal_rules": [
+    {
+      "match_any": ["turbidity"],
+      "impacted_groups": ["Treatment teams", "Facility operators"],
+      "priority_sites": ["Raw intake lines", "Filtration stages", "Storage tanks"],
+      "impact_copy": "Cloudier water can reduce intake quality quickly and disrupt filtration-heavy sites."
+    },
+    {
+      "match_any": ["do_mg_l", "oxygen"],
+      "impacted_groups": ["Waterfront maintenance teams"],
+      "priority_sites": ["Retention basins", "Waterfront exchange points"],
+      "impact_copy": "Oxygen stress can affect retention basins and waterfront operations before the issue is visible citywide."
+    },
+    {
+      "match_any": ["ph", "tds"],
+      "impacted_groups": ["Food preparation and clinic teams"],
+      "priority_sites": ["Clinic kitchens", "Sensitive refill points", "Food preparation areas"],
+      "impact_copy": "Rapid water chemistry shifts can affect direct intake, clinic kitchens, and sensitive refill points."
+    }
+  ]
+}

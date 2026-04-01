@@ -14,6 +14,7 @@ class Settings(BaseSettings):
 
     admin_username: str = "admin"
     admin_password: str = "admin123"
+    device_api_key: str = "anomalyguard-device-key"
 
     enable_simulator: bool = True
     poll_interval_seconds: float = 1.0
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     enable_kafka_publish: bool = False
 
     mlflow_tracking_uri: str = "file:./mlruns"
+    community_impact_profile_path: str = ""
 
 
 settings = Settings()

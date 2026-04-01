@@ -2,9 +2,7 @@ import asyncio
 import json
 import uuid
 from contextlib import suppress
-from datetime import datetime
 from time import perf_counter
-from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,18 +12,25 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.api.routes.community import router as community_router
+from app.api.routes.incidents import router as incidents_router
+from app.api.routes.jobs import router as jobs_router
 from app.celery_app import celery_app
 from app.config import settings
 from app.db import Base, SessionLocal, engine, get_db
-from app.dependencies import get_current_user, require_admin
-from app.schemas import AnomalyAlert, StationProfile, WaterReading
-from app.services.auth import create_access_token, get_password_hash, verify_password
-from app.services.detector import HybridAnomalyDetector
-from app.services.kafka_publisher import AlertKafkaPublisher
+from app.dependencies import get_current_user, require_admin, require_device_key
+from app.runtime import broadcast, state
+from app.schemas import (
+    AnomalyAlert,
+    DeviceControlState,
+    DeviceTelemetry,
+    StationProfile,
+    WaterReading,
+)
+from app.services.auth import create_access_token, verify_password
+from app.services.device_support import build_device_station_profile, build_device_telemetry_snapshot, telemetry_to_reading
 from app.services.metrics import ALERTS_GENERATED, INGEST_DURATION, READINGS_INGESTED
-from app.services.mlflow_logger import log_ingest_metrics
-from app.services.simulator import WaterReadingSimulator
-from app.services.stations import default_station_id, has_station, list_stations, register_station
+from app.services.stations import default_station_id, get_station, has_station, list_stations, register_station
 from app.services.store_pg import PostgresStore
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
@@ -37,27 +42,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-class AppState:
-    def __init__(self) -> None:
-        self.clients: set[WebSocket] = set()
-        self.simulator = WaterReadingSimulator()
-        self.detectors: dict[str, HybridAnomalyDetector] = {}
-        self.stream_task: asyncio.Task | None = None
-        self.poll_interval_seconds = settings.poll_interval_seconds
-        self.last_data_source = "simulated"
-        self.last_ingest_note = ""
-        self.kafka_publisher = AlertKafkaPublisher()
-        self.admin_password_hash = get_password_hash(settings.admin_password)
-
-    def detector_for(self, station_id: str) -> HybridAnomalyDetector:
-        if station_id not in self.detectors:
-            self.detectors[station_id] = HybridAnomalyDetector()
-        return self.detectors[station_id]
-
-
-state = AppState()
+app.include_router(jobs_router)
+app.include_router(community_router)
+app.include_router(incidents_router)
 
 
 def ensure_valid_station(station_id: str | None) -> None:
@@ -75,20 +62,6 @@ def init_db() -> None:
             conn.execute(text("SELECT create_hypertable('readings', 'timestamp', if_not_exists => TRUE)"))
         except Exception:
             pass
-
-
-async def broadcast(event: str, payload: dict) -> None:
-    dead_clients = []
-    message = json.dumps({"event": event, "payload": payload}, default=str)
-    for ws in list(state.clients):
-        try:
-            await ws.send_text(message)
-        except Exception:
-            dead_clients.append(ws)
-
-    for ws in dead_clients:
-        with suppress(KeyError):
-            state.clients.remove(ws)
 
 
 def insert_reading_and_alert(db: Session, reading: WaterReading) -> AnomalyAlert | None:
@@ -112,8 +85,9 @@ def insert_reading_and_alert(db: Session, reading: WaterReading) -> AnomalyAlert
     )
     store.add_alert(alert, explanation_text=explain_text)
     ALERTS_GENERATED.inc()
-    state.kafka_publisher.publish_alert(alert.model_dump(mode="json"))
-    return alert
+    persisted_alert = store.alert_with_incident(alert.id) or alert
+    state.kafka_publisher.publish_alert(persisted_alert.model_dump(mode="json"))
+    return persisted_alert
 
 
 async def stream_loop() -> None:
@@ -231,94 +205,141 @@ def explain_alert(alert_id: str, db: Session = Depends(get_db), user: dict = Dep
     }
 
 
-def _persist_ingest_payload(payload: dict[str, Any]) -> tuple[dict, int, int]:
-    station = payload["station"]
-    register_station(StationProfile(**station))
+@app.get("/api/device/status")
+def device_statuses(station_id: str | None = Query(default=None), db: Session = Depends(get_db)) -> list[dict]:
+    return PostgresStore(db).latest_device_states(station_id=station_id)
 
-    inserted = 0
-    alerts = 0
-    with SessionLocal() as db:
-        for raw in payload["readings"]:
-            reading = WaterReading(
-                timestamp=datetime.fromisoformat(raw["timestamp"]),
-                station_id=raw["station_id"],
-                ph=raw["ph"],
-                tds=raw["tds"],
-                turbidity=raw["turbidity"],
-                temperature_c=raw["temperature_c"],
-                do_mg_l=raw["do_mg_l"],
-                flow_l_min=raw["flow_l_min"],
+
+@app.get("/api/device/control/{station_id}")
+def get_device_control(station_id: str, db: Session = Depends(get_db), _: None = Depends(require_device_key)) -> dict:
+    return {"station_id": station_id, "control": PostgresStore(db).device_control_state(station_id)}
+
+
+@app.put("/api/device/control/{station_id}")
+async def set_device_control(
+    station_id: str,
+    payload: DeviceControlState,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_admin),
+) -> dict:
+    if has_station(station_id):
+        profile = get_station(station_id)
+    else:
+        profile = register_station(
+            StationProfile(
+                station_id=station_id,
+                station_name=f"Device {station_id}",
+                region="Edge device station",
+                timezone="Asia/Ho_Chi_Minh",
+                latitude=10.8231,
+                longitude=106.6297,
+                source="device",
             )
-            inserted += 1
-            if insert_reading_and_alert(db, reading) is not None:
-                alerts += 1
+        )
 
-    return station, inserted, alerts
+    state_payload = PostgresStore(db).set_device_control(profile, payload.model_dump(mode="json"))
+    await broadcast("device_control", state_payload)
+    return {"status": "ok", "station_id": station_id, "control": state_payload["control"], "requested_by": user.get("sub")}
+
+
+@app.post("/api/device/telemetry")
+async def ingest_device_telemetry(
+    payload: DeviceTelemetry,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_device_key),
+) -> dict:
+    profile = build_device_station_profile(payload)
+    known_station = has_station(profile.station_id)
+    register_station(profile)
+    payload.station_id = profile.station_id
+
+    store = PostgresStore(db)
+    control_state = store.device_control_state(profile.station_id)
+    reading, derived = telemetry_to_reading(payload, control_state)
+    telemetry_snapshot = build_device_telemetry_snapshot(payload, control_state, reading, derived)
+
+    state_payload = store.upsert_device_state(
+        profile=profile,
+        telemetry=telemetry_snapshot,
+        control=control_state,
+        reading_preview=reading.model_dump(mode="json"),
+        last_seen_at=reading.timestamp,
+    )
+
+    alert = insert_reading_and_alert(db, reading)
+
+    state.last_data_source = "device/esp32"
+    state.last_ingest_note = "Live device telemetry with inferred proxies for missing turbidity, dissolved oxygen, or flow fields."
+
+    await broadcast("device_status", state_payload)
+    await broadcast("reading", reading.model_dump(mode="json"))
+    if alert is not None:
+        await broadcast("alert", alert.model_dump(mode="json"))
+    if not known_station:
+        await broadcast("stations_updated", {"stations": stations()})
+
+    return {
+        "status": "ok",
+        "station": profile.model_dump(mode="json"),
+        "control": control_state,
+        "telemetry": telemetry_snapshot,
+        "reading": reading.model_dump(mode="json"),
+        "generated_alert": alert.model_dump(mode="json") if alert is not None else None,
+        "derived_fields": derived,
+    }
 
 
 @app.post("/api/ingest/vn")
 async def ingest_vn(
     station_id: str = Query(default="mekong-can-tho"),
     days: int = Query(default=30, ge=1, le=92),
+    db: Session = Depends(get_db),
     user: dict = Depends(require_admin),
 ) -> dict:
     ensure_valid_station(station_id)
     t0 = perf_counter()
-    task = celery_app.send_task("tasks.fetch_vn_data", args=[station_id, days])
-    payload = task.get(timeout=120)
-
-    station, inserted, alerts = await asyncio.to_thread(_persist_ingest_payload, payload)
-
-    state.last_data_source = "api/open-meteo-vn"
-    state.last_ingest_note = "Real VN hydro+temperature feed with derived quality proxies."
-    INGEST_DURATION.observe(perf_counter() - t0)
-    log_ingest_metrics("vn", inserted, alerts)
-
-    await broadcast(
-        "station_registered",
-        {"station": station, "inserted_readings": inserted, "generated_alerts": alerts, "source": "api/open-meteo-vn"},
+    job_id = str(uuid.uuid4())
+    store = PostgresStore(db)
+    job = store.create_job(
+        job_id=job_id,
+        job_type="ingest_vn",
+        requested_by=user.get("sub", "admin"),
+        parameters={"station_id": station_id, "days": days},
     )
 
-    return {
-        "status": "ok",
-        "source": "api/open-meteo-vn",
-        "requested_by": user.get("sub"),
-        "station": station,
-        "inserted_readings": inserted,
-        "generated_alerts": alerts,
-    }
+    try:
+        celery_app.send_task("tasks.run_vn_ingest_job", args=[station_id, days], task_id=job_id)
+    except Exception as exc:
+        job = store.update_job_status(job_id, "failed", error_message=str(exc)) or job
+
+    INGEST_DURATION.observe(perf_counter() - t0)
+    return job.model_dump(mode="json")
 
 
 @app.post("/api/ingest/usgs")
 async def ingest_usgs(
     site_no: str = Query(..., min_length=4, max_length=16),
     hours: int = Query(default=24, ge=1, le=168),
+    db: Session = Depends(get_db),
     user: dict = Depends(require_admin),
 ) -> dict:
     t0 = perf_counter()
-    task = celery_app.send_task("tasks.fetch_usgs_data", args=[site_no, hours])
-    payload = task.get(timeout=120)
-
-    station, inserted, alerts = await asyncio.to_thread(_persist_ingest_payload, payload)
-
-    state.last_data_source = "api/usgs"
-    state.last_ingest_note = "USGS site ingestion."
-    INGEST_DURATION.observe(perf_counter() - t0)
-    log_ingest_metrics("usgs", inserted, alerts)
-
-    await broadcast(
-        "station_registered",
-        {"station": station, "inserted_readings": inserted, "generated_alerts": alerts, "source": "api/usgs"},
+    job_id = str(uuid.uuid4())
+    store = PostgresStore(db)
+    job = store.create_job(
+        job_id=job_id,
+        job_type="ingest_usgs",
+        requested_by=user.get("sub", "admin"),
+        parameters={"site_no": site_no, "hours": hours},
     )
 
-    return {
-        "status": "ok",
-        "source": "api/usgs",
-        "requested_by": user.get("sub"),
-        "station": station,
-        "inserted_readings": inserted,
-        "generated_alerts": alerts,
-    }
+    try:
+        celery_app.send_task("tasks.run_usgs_ingest_job", args=[site_no, hours], task_id=job_id)
+    except Exception as exc:
+        job = store.update_job_status(job_id, "failed", error_message=str(exc)) or job
+
+    INGEST_DURATION.observe(perf_counter() - t0)
+    return job.model_dump(mode="json")
 
 
 @app.post("/api/stream/start")
@@ -344,9 +365,11 @@ async def ws_stream(websocket: WebSocket) -> None:
 
     try:
         with SessionLocal() as db:
+            store = PostgresStore(db)
             bootstrap_meta = meta(db)
             bootstrap_readings = latest_readings(limit=120, station_id=None, since_minutes=120, db=db)
             bootstrap_alerts = latest_alerts(limit=40, station_id=None, since_minutes=240, db=db)
+            bootstrap_device_statuses = store.latest_device_states()
 
         await websocket.send_text(
             json.dumps(
@@ -357,6 +380,7 @@ async def ws_stream(websocket: WebSocket) -> None:
                         "stations": stations(),
                         "readings": bootstrap_readings,
                         "alerts": bootstrap_alerts,
+                        "device_statuses": bootstrap_device_statuses,
                     },
                 },
                 default=str,

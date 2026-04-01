@@ -1,0 +1,36 @@
+{
+  "display_name": "Rural Drinking Water",
+  "description": "Best for shared tanks, simple filtration, and small public-service sites that depend on direct intake.",
+  "corridor_template": "rural households, shared storage points, and small public-service sites connected to {region}",
+  "base_impacted_groups": [
+    "Households",
+    "Schools and care sites",
+    "Local water point operators"
+  ],
+  "base_priority_sites": [
+    "Untreated intake points",
+    "Shared storage tanks",
+    "Schools and clinics"
+  ],
+  "default_impact_copy": "Operators should keep updates focused on untreated intake, shared storage safety, and continuity for essential public-service sites.",
+  "signal_rules": [
+    {
+      "match_any": ["turbidity"],
+      "impacted_groups": ["Tank and filtration operators"],
+      "priority_sites": ["Shared storage tanks", "Simple filtration units", "Raw intake lines"],
+      "impact_copy": "Cloudier water can reduce intake quality quickly and overwhelm simple filtration or storage routines."
+    },
+    {
+      "match_any": ["ph", "tds"],
+      "impacted_groups": ["Clinic and food preparation teams"],
+      "priority_sites": ["Clinic kitchens", "School meal areas", "Sensitive refill points"],
+      "impact_copy": "Rapid water chemistry shifts can make untreated water harder to use safely for direct intake, meal preparation, and clinic use."
+    },
+    {
+      "match_any": ["do_mg_l", "oxygen", "flow_l_min", "flow"],
+      "impacted_groups": ["Water point operators", "Field verification teams"],
+      "priority_sites": ["Low-flow intake points", "Backup storage points", "Distribution handoff locations"],
+      "impact_copy": "Low oxygen or unstable flow can disrupt small intake systems before the wider community sees visible change."
+    }
+  ]
+}

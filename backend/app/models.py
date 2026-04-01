@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import DateTime, Float, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -30,3 +32,45 @@ class AlertRecord(Base):
     reasons: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     feature_contributions: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     explanation_text: Mapped[str] = mapped_column(Text, default="")
+
+
+class IncidentRecord(Base):
+    __tablename__ = "incidents"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    station_id: Mapped[str] = mapped_column(String(128), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True, default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_changed_by: Mapped[str] = mapped_column(String(128), default="")
+    status_note: Mapped[str] = mapped_column(Text, default="")
+
+
+class JobRecord(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    job_type: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True, default="queued")
+    requested_by: Mapped[str] = mapped_column(String(128), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    parameters: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    result_payload: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    error_message: Mapped[str] = mapped_column(Text, default="")
+
+
+class DeviceStateRecord(Base):
+    __tablename__ = "device_states"
+
+    station_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    station_name: Mapped[str] = mapped_column(String(128), default="")
+    region: Mapped[str] = mapped_column(String(128), default="")
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True, nullable=True)
+    telemetry_payload: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    control_state: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    reading_preview: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))

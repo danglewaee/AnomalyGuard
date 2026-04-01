@@ -1,7 +1,7 @@
-﻿from datetime import datetime
-from typing import Dict, List, Literal
+from datetime import datetime
+from typing import Any, Dict, List, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StationProfile(BaseModel):
@@ -11,7 +11,7 @@ class StationProfile(BaseModel):
     timezone: str
     latitude: float
     longitude: float
-    source: Literal["simulated", "mqtt", "csv", "api"] = "simulated"
+    source: Literal["simulated", "mqtt", "csv", "api", "device"] = "simulated"
 
 
 class WaterReading(BaseModel):
@@ -33,3 +33,131 @@ class AnomalyAlert(BaseModel):
     score: float
     reasons: List[str]
     feature_contributions: Dict[str, float]
+    incident_status: Literal["open", "acknowledged", "resolved"] | None = None
+    incident_note: str | None = None
+    incident_updated_at: datetime | None = None
+
+
+class IncidentStatusUpdate(BaseModel):
+    note: str = ""
+
+
+class DeviceTelemetry(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    station_id: str = Field(default="esp32-device-001")
+    station_name: str | None = None
+    region: str | None = None
+    timezone: str = "Asia/Ho_Chi_Minh"
+    latitude: float | None = None
+    longitude: float | None = None
+    timestamp: datetime | None = None
+    time: str | None = None
+    client_id: str | None = Field(default=None, alias="clientID")
+    ph: float
+    tds: float
+    temperature_c: float | None = Field(default=None, alias="temp")
+    humidity: float | None = Field(default=None, alias="hum")
+    weight_g: float | None = Field(default=None, alias="weight")
+    water_temp_c: float | None = Field(default=None, alias="waterTemp")
+    is_feeding: bool = Field(default=False, alias="isFeeding")
+    turbidity: float | None = None
+    do_mg_l: float | None = None
+    flow_l_min: float | None = None
+
+
+class DeviceControlState(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    direction: int = Field(default=0, ge=0, le=4)
+    pump: bool = False
+    isFeeding: bool = False
+    weight: float = Field(default=100.0, ge=0.0)
+    hour: int = Field(default=0, ge=0, le=23)
+    minute: int = Field(default=0, ge=0, le=59)
+
+
+class DeviceStatus(BaseModel):
+    station_id: str
+    station_name: str
+    region: str
+    source: Literal["device"] = "device"
+    last_seen_at: datetime | None = None
+    telemetry: Dict[str, Any] = Field(default_factory=dict)
+    control: Dict[str, Any] = Field(default_factory=dict)
+    reading_preview: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CommunityOverviewSummary(BaseModel):
+    stable: int = 0
+    watch: int = 0
+    warning: int = 0
+    critical: int = 0
+    monitored_zones: int = 0
+    zones_at_risk: int = 0
+    recent_alerts: int = 0
+
+
+class CommunityZoneStation(BaseModel):
+    station_id: str
+    station_name: str
+    latitude: float
+    longitude: float
+    source: Literal["simulated", "mqtt", "csv", "api", "device"] = "simulated"
+
+
+class CommunityZoneOverview(BaseModel):
+    zone_id: str
+    name: str
+    risk_level: Literal["stable", "watch", "warning", "critical"]
+    headline: str
+    community_message: str
+    recommended_action: str
+    impact_statement: str = ""
+    downstream_corridor: str = ""
+    recent_alert_count: int = 0
+    station_count: int = 0
+    top_signals: List[str] = Field(default_factory=list)
+    station_names: List[str] = Field(default_factory=list)
+    impacted_groups: List[str] = Field(default_factory=list)
+    priority_sites: List[str] = Field(default_factory=list)
+    centroid_latitude: float | None = None
+    centroid_longitude: float | None = None
+    stations: List[CommunityZoneStation] = Field(default_factory=list)
+    latest_update_at: datetime | None = None
+
+
+class CommunityImpactProfileOption(BaseModel):
+    key: str
+    display_name: str
+    description: str = ""
+    is_default: bool = False
+
+
+class CommunityImpactProfilesResponse(BaseModel):
+    active_profile: str
+    profiles: List[CommunityImpactProfileOption] = Field(default_factory=list)
+
+
+class CommunityOverview(BaseModel):
+    generated_at: datetime
+    since_minutes: int
+    headline: str
+    impact_profile: str = ""
+    impact_profile_name: str = ""
+    summary: CommunityOverviewSummary
+    zones: List[CommunityZoneOverview] = Field(default_factory=list)
+
+
+class JobStatus(BaseModel):
+    id: str
+    job_type: str
+    status: Literal["queued", "running", "succeeded", "failed"]
+    requested_by: str = ""
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    result_payload: Dict[str, Any] = Field(default_factory=dict)
+    error_message: str = ""

@@ -1,0 +1,45 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1600" y2="900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071826"/>
+      <stop offset="1" stop-color="#113757"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="900" rx="28" fill="url(#bg)"/>
+  <circle cx="1310" cy="172" r="170" fill="#4AA8F3" fill-opacity="0.06"/>
+  <circle cx="192" cy="744" r="220" fill="#15D6A2" fill-opacity="0.06"/>
+
+  <text x="120" y="138" fill="#8FD5E8" font-family="Segoe UI, Arial, sans-serif" font-size="24" letter-spacing="4">SYSTEM FLOW</text>
+  <text x="120" y="256" fill="#F7FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="88" font-weight="700">Pipeline</text>
+  <text x="120" y="336" fill="#CFE1F1" font-family="Segoe UI, Arial, sans-serif" font-size="34">From ingest to scoring</text>
+  <text x="120" y="382" fill="#CFE1F1" font-family="Segoe UI, Arial, sans-serif" font-size="34">to live operator view.</text>
+
+  <rect x="772" y="162" width="520" height="96" rx="28" fill="#F7FBFF"/>
+  <text x="812" y="202" fill="#10243A" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="700">1. Ingest</text>
+  <text x="812" y="236" fill="#5E7A92" font-family="Segoe UI, Arial, sans-serif" font-size="22">Open-Meteo VN, USGS, simulator</text>
+
+  <rect x="1008" y="274" width="48" height="48" rx="24" fill="#10243A"/>
+  <path d="M1032 286V310" fill="none" stroke="#89C3DA" stroke-width="6" stroke-linecap="round"/>
+  <path d="M1032 316L1020 302H1044L1032 316Z" fill="#89C3DA"/>
+
+  <rect x="772" y="338" width="520" height="96" rx="28" fill="#F7FBFF"/>
+  <text x="812" y="378" fill="#10243A" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="700">2. API Core</text>
+  <text x="812" y="412" fill="#5E7A92" font-family="Segoe UI, Arial, sans-serif" font-size="22">FastAPI, JWT, WebSocket stream</text>
+
+  <rect x="1008" y="450" width="48" height="48" rx="24" fill="#10243A"/>
+  <path d="M1032 462V486" fill="none" stroke="#89C3DA" stroke-width="6" stroke-linecap="round"/>
+  <path d="M1032 492L1020 478H1044L1032 492Z" fill="#89C3DA"/>
+
+  <rect x="772" y="514" width="520" height="96" rx="28" fill="#F7FBFF"/>
+  <text x="812" y="554" fill="#10243A" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="700">3. Detection</text>
+  <text x="812" y="588" fill="#5E7A92" font-family="Segoe UI, Arial, sans-serif" font-size="22">Isolation Forest, rules, top factors</text>
+
+  <rect x="1008" y="626" width="48" height="48" rx="24" fill="#10243A"/>
+  <path d="M1032 638V662" fill="none" stroke="#89C3DA" stroke-width="6" stroke-linecap="round"/>
+  <path d="M1032 668L1020 654H1044L1032 668Z" fill="#89C3DA"/>
+
+  <rect x="772" y="690" width="520" height="96" rx="28" fill="#F7FBFF"/>
+  <text x="812" y="730" fill="#10243A" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="700">4. Surface</text>
+  <text x="812" y="764" fill="#5E7A92" font-family="Segoe UI, Arial, sans-serif" font-size="22">Dashboard, alerts, operator review</text>
+</svg>

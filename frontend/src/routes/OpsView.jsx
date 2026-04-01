@@ -1,0 +1,322 @@
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+
+import RiskPill from "../components/RiskPill.jsx";
+import { DIRECTION_OPTIONS, TIME_WINDOW_OPTIONS, VN_STATIONS } from "../constants.js";
+import { alertImpactCopy, communityRiskFromOperatorSeverity, formatTimestamp } from "../lib/risk.js";
+
+function OpsView({
+  connected,
+  meta,
+  username,
+  password,
+  authMessage,
+  onUsernameChange,
+  onPasswordChange,
+  onLogin,
+  stations,
+  stationId,
+  onStationChange,
+  sinceMinutes,
+  onSinceMinutesChange,
+  vnIngestStation,
+  onVnStationChange,
+  onRunIngest,
+  ingesting,
+  ingestMessage,
+  authToken,
+  deviceStations,
+  deviceStationId,
+  onDeviceStationChange,
+  selectedDeviceStatus,
+  selectedTelemetry,
+  deviceLastSeen,
+  inferredFields,
+  deviceControl,
+  onDeviceControlPatch,
+  onRunDeviceControl,
+  controlBusy,
+  deviceMessage,
+  latest,
+  chartData,
+  filteredAlerts,
+  onIncidentAction,
+  incidentBusyId,
+  incidentMessage,
+}) {
+  const controlTime = `${String(deviceControl.hour).padStart(2, "0")}:${String(deviceControl.minute).padStart(2, "0")}`;
+
+  return (
+    <div className="page">
+      <section className="pageIntro">
+        <div>
+          <p className="eyebrow">Operator Console</p>
+          <h1>Monitor stations, triage alerts, and coordinate device response</h1>
+          <p className="lede">
+            This view keeps ingest actions, raw telemetry, and control payloads with the operations team. Community-safe
+            messaging now lives in a separate route.
+          </p>
+        </div>
+        <div className="statusStack">
+          <div className="statusCard">
+            <span className="statusLabel">Realtime</span>
+            <strong>{connected ? "Connected" : "Disconnected"}</strong>
+          </div>
+          <div className="statusCard">
+            <span className="statusLabel">Data Source</span>
+            <strong>{meta?.data_source || "-"}</strong>
+          </div>
+          <div className="statusCard">
+            <span className="statusLabel">Device Fleet</span>
+            <strong>{meta?.counts?.device_states ?? 0}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel authPanel">
+        <div>
+          <label htmlFor="username">Admin User</label>
+          <input id="username" value={username} onChange={(event) => onUsernameChange(event.target.value)} />
+        </div>
+        <div>
+          <label htmlFor="password">Password</label>
+          <input id="password" type="password" value={password} onChange={(event) => onPasswordChange(event.target.value)} />
+        </div>
+        <button onClick={onLogin}>Login</button>
+        <div className="muted tiny">{authMessage || "Required for ingest and device control."}</div>
+      </section>
+
+      <section className="panel controls">
+        <div>
+          <label htmlFor="station">Station</label>
+          <select id="station" value={stationId} onChange={(event) => onStationChange(event.target.value)}>
+            <option value="all">All Stations</option>
+            {stations.map((station) => (
+              <option key={station.station_id} value={station.station_id}>
+                {station.station_name} ({station.region})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="window">Time Window</label>
+          <select id="window" value={sinceMinutes} onChange={(event) => onSinceMinutesChange(Number(event.target.value))}>
+            {TIME_WINDOW_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="metaBlock">
+          <strong>Note:</strong> {meta?.last_ingest_note || "-"}
+          <br />
+          <strong>Readings:</strong> {meta?.counts?.readings ?? 0}
+          <br />
+          <strong>Alerts:</strong> {meta?.counts?.alerts ?? 0}
+        </div>
+      </section>
+
+      <section className="panel ingestPanel">
+        <div>
+          <label htmlFor="vnStation">VN Station (Real Feed)</label>
+          <select id="vnStation" value={vnIngestStation} onChange={(event) => onVnStationChange(event.target.value)}>
+            {VN_STATIONS.map((station) => (
+              <option key={station.id} value={station.id}>
+                {station.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button onClick={onRunIngest} disabled={ingesting || !authToken}>
+          {ingesting ? "Ingesting..." : "Ingest VN Real Data"}
+        </button>
+        <div className="muted tiny">
+          {ingestMessage || "Use this to pull the live VN feed before sharing a public update."}
+        </div>
+      </section>
+
+      <section className="panel devicePanel">
+        <div>
+          <label htmlFor="deviceStation">Device Station</label>
+          <select id="deviceStation" value={deviceStationId} onChange={(event) => onDeviceStationChange(event.target.value)}>
+            <option value="">No device linked</option>
+            {deviceStations.map((station) => (
+              <option key={station.station_id} value={station.station_id}>
+                {station.station_name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="metaBlock">
+          <strong>Last Seen:</strong> {selectedDeviceStatus ? deviceLastSeen : "No device selected"}
+          <br />
+          <strong>Client:</strong> {selectedTelemetry.client_id || "-"}
+          <br />
+          <strong>Proxy Fields:</strong> {inferredFields.length > 0 ? inferredFields.join(", ") : "None"}
+        </div>
+        <div className="deviceStats">
+          <MiniStat title="Water Temp" value={selectedTelemetry.water_temp_c != null ? `${selectedTelemetry.water_temp_c} C` : "-"} />
+          <MiniStat title="Air Temp" value={selectedTelemetry.ambient_temp_c != null ? `${selectedTelemetry.ambient_temp_c} C` : "-"} />
+          <MiniStat title="Humidity" value={selectedTelemetry.humidity != null ? `${selectedTelemetry.humidity}%` : "-"} />
+          <MiniStat title="Load Cell" value={selectedTelemetry.weight_g != null ? `${selectedTelemetry.weight_g} g` : "-"} />
+        </div>
+      </section>
+
+      <section className="panel deviceControlPanel">
+        <div>
+          <label htmlFor="direction">Direction</label>
+          <select id="direction" value={deviceControl.direction} onChange={(event) => onDeviceControlPatch({ direction: Number(event.target.value) })}>
+            {DIRECTION_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="feedTime">Feed Time</label>
+          <input
+            id="feedTime"
+            type="time"
+            value={controlTime}
+            onChange={(event) => {
+              const [hour, minute] = event.target.value.split(":").map(Number);
+              onDeviceControlPatch({ hour: hour || 0, minute: minute || 0 });
+            }}
+          />
+        </div>
+        <div>
+          <label htmlFor="feedWeight">Feed Weight (g)</label>
+          <input
+            id="feedWeight"
+            type="number"
+            min="0"
+            value={deviceControl.weight}
+            onChange={(event) => onDeviceControlPatch({ weight: Number(event.target.value) || 0 })}
+          />
+        </div>
+        <div className="toggleRow">
+          <label className={`toggleChip ${deviceControl.pump ? "active" : ""}`}>
+            <input type="checkbox" checked={deviceControl.pump} onChange={(event) => onDeviceControlPatch({ pump: event.target.checked })} />
+            Pump
+          </label>
+          <label className={`toggleChip ${deviceControl.isFeeding ? "active" : ""}`}>
+            <input
+              type="checkbox"
+              checked={deviceControl.isFeeding}
+              onChange={(event) => onDeviceControlPatch({ isFeeding: event.target.checked })}
+            />
+            Feeding
+          </label>
+        </div>
+        <button onClick={onRunDeviceControl} disabled={controlBusy || !authToken || !deviceStationId}>
+          {controlBusy ? "Updating..." : "Push Device Control"}
+        </button>
+        <div className="muted tiny">{deviceMessage || "Keep these controls in ops only; do not expose them in public view."}</div>
+      </section>
+
+      <section className="cards">
+        <Metric title="pH" value={latest ? latest.ph : "-"} />
+        <Metric title="TDS" value={latest ? `${latest.tds} ppm` : "-"} />
+        <Metric title="Turbidity" value={latest ? `${latest.turbidity} NTU` : "-"} />
+        <Metric title="DO" value={latest ? `${latest.do_mg_l} mg/L` : "-"} />
+      </section>
+
+      <section className="grid">
+        <div className="panel">
+          <h2>Water Signals</h2>
+          <div className="chartWrap">
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="t" hide />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="turbidity" stroke="#d64545" dot={false} />
+                <Line type="monotone" dataKey="tds" stroke="#1d6fd4" dot={false} />
+                <Line type="monotone" dataKey="ph" stroke="#24937e" dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="panel">
+          <h2>Recent Alerts</h2>
+          <div className="muted tiny alertGuide">{incidentMessage || "Acknowledge active alerts, then resolve them once the field check is complete."}</div>
+          <div className="alerts">
+            {filteredAlerts.length === 0 && <p className="muted">No anomalies in selected scope.</p>}
+            {filteredAlerts.map((alert) => {
+              const incidentStatus = alert.incident_status || "open";
+              const isBusy = incidentBusyId === alert.id;
+
+              return (
+                <div key={alert.id} className={`alertItem sev-${alert.severity}`}>
+                  <div className="alertHead">
+                    <strong>{alert.severity.toUpperCase()}</strong>
+                    <span>score: {alert.score}</span>
+                  </div>
+                  <div className="alertMeta">
+                    <RiskPill level={communityRiskFromOperatorSeverity(alert.severity)} />
+                    <span>{alert.station_id}</span>
+                  </div>
+                  <div className="alertReasons">{(alert.reasons || []).join(", ") || "anomalous pattern"}</div>
+                  <p className="alertImpact">{alertImpactCopy(alert)}</p>
+                  <div className="incidentMetaRow">
+                    <span className={`incidentBadge incident-${incidentStatus}`}>{incidentStatus}</span>
+                    <span className="muted tiny">{formatTimestamp(alert.incident_updated_at || alert.timestamp)}</span>
+                  </div>
+                  {alert.incident_note ? <div className="muted tiny">{alert.incident_note}</div> : null}
+                  <div className="incidentActions">
+                    {incidentStatus === "open" ? (
+                      <button className="inlineButton" onClick={() => onIncidentAction(alert.id, "acknowledge")} disabled={isBusy || !authToken}>
+                        {isBusy ? "Updating..." : "Acknowledge"}
+                      </button>
+                    ) : null}
+                    {incidentStatus === "acknowledged" ? (
+                      <button className="inlineButton secondary" onClick={() => onIncidentAction(alert.id, "resolve")} disabled={isBusy || !authToken}>
+                        {isBusy ? "Updating..." : "Resolve"}
+                      </button>
+                    ) : null}
+                    {incidentStatus === "resolved" ? (
+                      <button className="inlineButton ghost" onClick={() => onIncidentAction(alert.id, "reopen")} disabled={isBusy || !authToken}>
+                        {isBusy ? "Updating..." : "Reopen"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Metric({ title, value }) {
+  return (
+    <div className="card">
+      <p>{title}</p>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function MiniStat({ title, value }) {
+  return (
+    <div className="miniCard">
+      <span>{title}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+export default OpsView;

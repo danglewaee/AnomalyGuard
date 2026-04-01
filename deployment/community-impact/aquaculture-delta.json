@@ -1,0 +1,36 @@
+{
+  "display_name": "Aquaculture Delta",
+  "description": "Best for canal and pond-heavy deployments where oxygen stress and exchange timing matter operationally.",
+  "corridor_template": "canal-linked households, pond clusters, and intake-dependent sites connected to {region}",
+  "base_impacted_groups": [
+    "Households",
+    "Aquaculture operators",
+    "Local care sites"
+  ],
+  "base_priority_sites": [
+    "Untreated intake points",
+    "Pond exchange gates",
+    "Schools and clinics"
+  ],
+  "default_impact_copy": "Operators should keep updates focused on untreated intake, pond exchange timing, and water-dependent livelihoods.",
+  "signal_rules": [
+    {
+      "match_any": ["turbidity"],
+      "impacted_groups": ["Pond managers", "Treatment teams"],
+      "priority_sites": ["Pond exchange gates", "Raw intake lines", "Settling ponds"],
+      "impact_copy": "Sediment-heavy water can stress pond exchange routines and reduce untreated intake quality quickly."
+    },
+    {
+      "match_any": ["do_mg_l", "oxygen"],
+      "impacted_groups": ["Aeration crews", "Aquaculture operators"],
+      "priority_sites": ["Ponds and aeration-dependent sites", "Hatchery tanks"],
+      "impact_copy": "Oxygen stress can hit ponds, hatcheries, and aeration-dependent sites very quickly."
+    },
+    {
+      "match_any": ["ph", "tds", "flow_l_min", "flow"],
+      "impacted_groups": ["Feed and hatchery teams", "Food preparation and clinic teams"],
+      "priority_sites": ["Hatchery tanks", "Mixing and storage points", "Clinic kitchens"],
+      "impact_copy": "Rapid water chemistry or flow changes can affect hatcheries, pond exchange timing, and untreated intake safety."
+    }
+  ]
+}

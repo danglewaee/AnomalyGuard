@@ -1,0 +1,16 @@
+{
+  "station_id": "esp32-device-001",
+  "station_name": "Home Device",
+  "region": "Home Lab",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "clientID": "esp32",
+  "timestamp": "2026-03-17T20:30:00Z",
+  "time": "03:30",
+  "ph": 7.18,
+  "tds": 422.0,
+  "temp": 31.1,
+  "hum": 68.5,
+  "weight": 350.0,
+  "waterTemp": 28.4,
+  "isFeeding": false
+}
