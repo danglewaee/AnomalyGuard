@@ -81,6 +81,8 @@ class IngestPipelineTests(unittest.TestCase):
         ), patch("app.services.ingest_pipeline.HybridAnomalyDetector", return_value=detector), patch(
             "app.services.ingest_pipeline.AlertKafkaPublisher"
         ), patch("app.services.ingest_pipeline.register_station"), patch(
+            "app.services.ingest_pipeline.record_ingest_summary_metrics"
+        ) as record_metrics, patch(
             "app.services.ingest_pipeline.log_ingest_metrics"
         ) as log_metrics:
             result = _persist_reading_batch(
@@ -94,6 +96,7 @@ class IngestPipelineTests(unittest.TestCase):
         self.assertEqual(result["inserted_readings"], 1)
         self.assertEqual(result["skipped_duplicates"], 2)
         self.assertEqual(result["generated_alerts"], 0)
+        record_metrics.assert_called_once_with("api/open-meteo-vn", 1, 0, skipped_duplicates=2)
         log_metrics.assert_called_once_with("api/open-meteo-vn", 1, 0, skipped_duplicates=2)
 
     def test_persist_batch_only_generates_alerts_for_new_readings(self) -> None:
@@ -153,6 +156,8 @@ class IngestPipelineTests(unittest.TestCase):
             "app.services.ingest_pipeline.AlertKafkaPublisher",
             return_value=publisher,
         ), patch("app.services.ingest_pipeline.register_station"), patch(
+            "app.services.ingest_pipeline.record_ingest_summary_metrics"
+        ) as record_metrics, patch(
             "app.services.ingest_pipeline.log_ingest_metrics"
         ):
             result = _persist_reading_batch(
@@ -167,3 +172,4 @@ class IngestPipelineTests(unittest.TestCase):
         self.assertEqual(result["generated_alerts"], 1)
         self.assertEqual(len(added_alert_ids), 1)
         self.assertEqual(len(published_payloads), 1)
+        record_metrics.assert_called_once_with("api/usgs", 1, 1, skipped_duplicates=1)

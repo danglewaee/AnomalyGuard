@@ -7,6 +7,7 @@ from app.schemas import AnomalyAlert, StationProfile, WaterReading
 from app.services.detector import HybridAnomalyDetector
 from app.services.kafka_publisher import AlertKafkaPublisher
 from app.services.mlflow_logger import log_ingest_metrics
+from app.services.metrics import record_ingest_summary_metrics
 from app.services.stations import register_station
 from app.services.store_pg import PostgresStore
 from app.services.usgs_ingest import fetch_usgs_readings
@@ -75,6 +76,7 @@ def _persist_reading_batch(
             publisher.publish_alert(persisted_alert.model_dump(mode="json"))
             alerts += 1
 
+    record_ingest_summary_metrics(source, inserted, alerts, skipped_duplicates=skipped_duplicates)
     log_ingest_metrics(source, inserted, alerts, skipped_duplicates=skipped_duplicates)
     return {
         "source": source,

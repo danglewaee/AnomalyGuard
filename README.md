@@ -182,7 +182,9 @@ FAANG-grade platform planning docs:
 ## Observability
 
 - Prometheus metrics endpoint: `GET /metrics`
-- Alert/readings counters and ingest latency are exported
+- Alert/readings counters and ingest request latency are exported
+- Job lifecycle metrics now include status transitions, queue time, and run time by job type
+- Ingest observability now tracks completed batches and duplicate readings skipped per source
 
 ## Notes
 

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models import AlertRecord, DeviceStateRecord, IncidentRecord, JobRecord, ReadingRecord
 from app.schemas import AnomalyAlert, JobStatus, StationProfile, WaterReading
 from app.services.device_support import normalize_device_control
+from app.services.metrics import observe_job_queue_seconds, observe_job_run_seconds, record_job_status_transition
 
 
 class PostgresStore:
@@ -192,6 +193,7 @@ class PostgresStore:
         self.db.add(row)
         self.db.commit()
         self.db.refresh(row)
+        record_job_status_transition(job_type, "queued")
         return self._job_to_schema(row)
 
     def get_job(self, job_id: str) -> JobStatus | None:
@@ -213,12 +215,17 @@ class PostgresStore:
             return None
 
         now = datetime.now(timezone.utc)
+        queue_seconds: float | None = None
+        run_seconds: float | None = None
         row.status = status
         row.updated_at = now
         if status == "running" and row.started_at is None:
             row.started_at = now
+            queue_seconds = (row.started_at - row.created_at).total_seconds()
         if status in {"succeeded", "failed"}:
             row.completed_at = now
+            if row.started_at is not None:
+                run_seconds = (row.completed_at - row.started_at).total_seconds()
 
         if result_payload is not None:
             row.result_payload = result_payload
@@ -227,6 +234,11 @@ class PostgresStore:
 
         self.db.commit()
         self.db.refresh(row)
+        record_job_status_transition(row.job_type, status)
+        if queue_seconds is not None:
+            observe_job_queue_seconds(row.job_type, queue_seconds)
+        if run_seconds is not None:
+            observe_job_run_seconds(row.job_type, status, run_seconds)
         return self._job_to_schema(row)
 
     def latest_device_states(self, station_id: str | None = None) -> list[dict]:
