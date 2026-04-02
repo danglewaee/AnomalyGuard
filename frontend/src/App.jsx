@@ -49,6 +49,8 @@ function App() {
   const [controlDirty, setControlDirty] = useState(false);
   const [incidentBusyId, setIncidentBusyId] = useState("");
   const [incidentMessage, setIncidentMessage] = useState("");
+  const [reviewExportBusy, setReviewExportBusy] = useState(false);
+  const [reviewExportMessage, setReviewExportMessage] = useState("");
 
   const navigate = useCallback((nextRoute) => {
     const normalized = normalizeRoute(nextRoute);
@@ -501,6 +503,58 @@ function App() {
     }
   };
 
+  const runReviewedAlertExport = async () => {
+    setReviewExportMessage("");
+    if (!authToken) {
+      setReviewExportMessage("Login admin first to export labeled alerts.");
+      return;
+    }
+
+    setReviewExportBusy(true);
+    try {
+      const params = new URLSearchParams({
+        format: "csv",
+        since_minutes: String(sinceMinutes),
+        limit: "1000",
+      });
+      if (stationId !== "all") {
+        params.set("station_id", stationId);
+      }
+
+      const res = await fetch(`${API_BASE}/api/alerts/labeled/export?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (!res.ok) {
+        let detail = "Alert export failed";
+        try {
+          const body = await res.json();
+          detail = body.detail || detail;
+        } catch {
+          // Ignore parse failures and keep the default message.
+        }
+        setReviewExportMessage(detail);
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const disposition = res.headers.get("content-disposition") || "";
+      const filenameMatch = disposition.match(/filename=\"?([^"]+)\"?/i);
+      anchor.href = url;
+      anchor.download = filenameMatch?.[1] || "anomalyguard-labeled-alerts.csv";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+      setReviewExportMessage("Downloaded labeled alerts export.");
+    } catch {
+      setReviewExportMessage("Cannot reach backend for labeled alert export.");
+    } finally {
+      setReviewExportBusy(false);
+    }
+  };
+
   const filteredReadings = useMemo(() => {
     if (stationId === "all") return readings;
     return readings.filter((reading) => reading.station_id === stationId);
@@ -602,8 +656,11 @@ function App() {
           filteredAlerts={filteredAlerts}
           onIncidentAction={runIncidentAction}
           onReviewAction={runAlertReview}
+          onExportReviewedAlerts={runReviewedAlertExport}
           incidentBusyId={incidentBusyId}
           incidentMessage={incidentMessage}
+          reviewExportBusy={reviewExportBusy}
+          reviewExportMessage={reviewExportMessage}
         />
       )}
     </div>

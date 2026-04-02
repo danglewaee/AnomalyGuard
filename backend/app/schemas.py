@@ -51,6 +51,15 @@ class AlertReviewUpdate(BaseModel):
     note: str = ""
 
 
+class LabeledAlertExportResponse(BaseModel):
+    exported_at: datetime
+    count: int
+    label_filter: Literal["true_anomaly", "false_positive"] | None = None
+    station_id: str | None = None
+    since_minutes: int | None = None
+    items: List[AnomalyAlert] = Field(default_factory=list)
+
+
 class DeviceTelemetry(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 

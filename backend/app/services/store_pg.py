@@ -100,6 +100,30 @@ class PostgresStore:
         rows = self.db.execute(stmt.order_by(AlertRecord.timestamp.desc()).limit(limit)).all()
         return [self._alert_to_schema(alert_row, incident_row) for alert_row, incident_row in rows]
 
+    def reviewed_alerts(
+        self,
+        limit: int,
+        *,
+        label: str | None = None,
+        station_id: str | None = None,
+        since_minutes: int | None = None,
+    ) -> list[AnomalyAlert]:
+        stmt = select(AlertRecord, IncidentRecord).join(IncidentRecord, IncidentRecord.id == AlertRecord.id).where(
+            IncidentRecord.review_label.is_not(None)
+        )
+        if label:
+            stmt = stmt.where(IncidentRecord.review_label == label)
+        if station_id:
+            stmt = stmt.where(AlertRecord.station_id == station_id)
+        if since_minutes and since_minutes > 0:
+            since = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
+            stmt = stmt.where(IncidentRecord.reviewed_at >= since)
+
+        rows = self.db.execute(
+            stmt.order_by(IncidentRecord.reviewed_at.desc(), AlertRecord.timestamp.desc()).limit(limit)
+        ).all()
+        return [self._alert_to_schema(alert_row, incident_row) for alert_row, incident_row in rows]
+
     def get_alert(self, alert_id: str) -> AlertRecord | None:
         return self.db.get(AlertRecord, alert_id)
 

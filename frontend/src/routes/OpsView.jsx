@@ -49,8 +49,11 @@ function OpsView({
   filteredAlerts,
   onIncidentAction,
   onReviewAction,
+  onExportReviewedAlerts,
   incidentBusyId,
   incidentMessage,
+  reviewExportBusy,
+  reviewExportMessage,
 }) {
   const controlTime = `${String(deviceControl.hour).padStart(2, "0")}:${String(deviceControl.minute).padStart(2, "0")}`;
 
@@ -250,8 +253,16 @@ function OpsView({
         </div>
 
         <div className="panel">
-          <h2>Recent Alerts</h2>
-          <div className="muted tiny alertGuide">{incidentMessage || "Acknowledge active alerts, then resolve them once the field check is complete."}</div>
+          <div className="sectionTitle">
+            <div>
+              <h2>Recent Alerts</h2>
+              <div className="muted tiny alertGuide">{incidentMessage || "Acknowledge active alerts, then resolve them once the field check is complete."}</div>
+              <div className="muted tiny exportGuide">{reviewExportMessage || "Export reviewed alerts to create a supervised feedback dataset."}</div>
+            </div>
+            <button className="inlineButton subtle" onClick={onExportReviewedAlerts} disabled={reviewExportBusy || !authToken}>
+              {reviewExportBusy ? "Exporting..." : "Export Reviewed Alerts"}
+            </button>
+          </div>
           <div className="alerts">
             {filteredAlerts.length === 0 && <p className="muted">No anomalies in selected scope.</p>}
             {filteredAlerts.map((alert) => {

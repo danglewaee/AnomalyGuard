@@ -86,6 +86,8 @@ Incident workflow endpoints:
 - `POST /api/incidents/{alert_id}/reopen`
 - `POST /api/alerts/{alert_id}/review`
   - body: `{"label":"true_anomaly"}` or `{"label":"false_positive"}`
+- `GET /api/alerts/labeled/export?format=csv`
+  - admin-only export for reviewed alerts, optionally filtered by `label`, `station_id`, `since_minutes`, and `limit`
 
 Job status endpoint:
 

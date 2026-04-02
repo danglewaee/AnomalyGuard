@@ -360,6 +360,10 @@ h3 {
   margin-top: 8px;
 }
 
+.exportGuide {
+  margin-top: 4px;
+}
+
 .riskPill {
   display: inline-flex;
   align-items: center;

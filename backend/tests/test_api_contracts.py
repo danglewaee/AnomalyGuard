@@ -315,6 +315,108 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         broadcast.assert_awaited_once()
         self.assertEqual(broadcast.await_args.args[0], "alert_review")
 
+    async def test_export_labeled_alerts_returns_filtered_json_payload(self) -> None:
+        now = datetime.now(UTC)
+        exported_alert = AnomalyAlert(
+            id="alert-export",
+            timestamp=now - timedelta(minutes=30),
+            station_id="mekong-can-tho",
+            severity="medium",
+            score=0.64,
+            reasons=["turbidity outside safe range"],
+            feature_contributions={"turbidity": 1.7},
+            incident_status="acknowledged",
+            incident_note="Field check in progress",
+            incident_updated_at=now - timedelta(minutes=15),
+            review_label="true_anomaly",
+            review_note="Confirmed by operator",
+            reviewed_at=now - timedelta(minutes=10),
+            reviewed_by="test-admin",
+        )
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def reviewed_alerts(
+                self,
+                limit: int,
+                *,
+                label: str | None = None,
+                station_id: str | None = None,
+                since_minutes: int | None = None,
+            ) -> list[AnomalyAlert]:
+                self.last_call = {
+                    "limit": limit,
+                    "label": label,
+                    "station_id": station_id,
+                    "since_minutes": since_minutes,
+                }
+                return [exported_alert]
+
+        with patch.object(alert_routes, "PostgresStore", FakeStore):
+            response = await self.client.get(
+                "/api/alerts/labeled/export",
+                params={
+                    "format": "json",
+                    "label": "true_anomaly",
+                    "station_id": "mekong-can-tho",
+                    "since_minutes": 720,
+                    "limit": 50,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["label_filter"], "true_anomaly")
+        self.assertEqual(payload["station_id"], "mekong-can-tho")
+        self.assertEqual(payload["items"][0]["review_label"], "true_anomaly")
+
+    async def test_export_labeled_alerts_can_stream_csv(self) -> None:
+        now = datetime.now(UTC)
+        exported_alert = AnomalyAlert(
+            id="alert-csv",
+            timestamp=now - timedelta(minutes=45),
+            station_id="mekong-can-tho",
+            severity="low",
+            score=0.48,
+            reasons=["statistical deviation from recent baseline"],
+            feature_contributions={"tds": 1.1},
+            incident_status="open",
+            incident_note="",
+            incident_updated_at=now - timedelta(minutes=40),
+            review_label="false_positive",
+            review_note="Sensor wash cycle",
+            reviewed_at=now - timedelta(minutes=35),
+            reviewed_by="test-admin",
+        )
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def reviewed_alerts(
+                self,
+                limit: int,
+                *,
+                label: str | None = None,
+                station_id: str | None = None,
+                since_minutes: int | None = None,
+            ) -> list[AnomalyAlert]:
+                return [exported_alert]
+
+        with patch.object(alert_routes, "PostgresStore", FakeStore):
+            response = await self.client.get(
+                "/api/alerts/labeled/export",
+                params={"format": "csv", "label": "false_positive"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.headers.get("content-type", ""))
+        self.assertIn("review_label", response.text)
+        self.assertIn("false_positive", response.text)
+
     async def test_community_overview_filters_resolved_alerts_and_uses_selected_profile(self) -> None:
         now = datetime.now(UTC)
         stations = [
