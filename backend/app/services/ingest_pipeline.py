@@ -37,13 +37,24 @@ def _persist_reading_batch(
     detector = HybridAnomalyDetector()
     publisher = AlertKafkaPublisher()
     inserted = 0
+    skipped_duplicates = 0
     alerts = 0
 
     with SessionLocal() as db:
         store = PostgresStore(db)
+        existing_timestamps = store.existing_reading_timestamps(
+            station.station_id,
+            [reading.timestamp for reading in readings],
+        )
+        seen_timestamps = set(existing_timestamps)
         for reading in readings:
+            if reading.timestamp in seen_timestamps:
+                skipped_duplicates += 1
+                continue
+
             store.add_reading(reading)
             inserted += 1
+            seen_timestamps.add(reading.timestamp)
 
             result = detector.score(reading)
             if not result.is_anomaly:
@@ -64,12 +75,13 @@ def _persist_reading_batch(
             publisher.publish_alert(persisted_alert.model_dump(mode="json"))
             alerts += 1
 
-    log_ingest_metrics(source, inserted, alerts)
+    log_ingest_metrics(source, inserted, alerts, skipped_duplicates=skipped_duplicates)
     return {
         "source": source,
         "ingest_note": ingest_note,
         "station": station.model_dump(mode="json"),
         "inserted_readings": inserted,
+        "skipped_duplicates": skipped_duplicates,
         "generated_alerts": alerts,
     }
 

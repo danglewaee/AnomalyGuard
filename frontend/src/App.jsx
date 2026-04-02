@@ -367,7 +367,7 @@ function App() {
             }
             loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
             setIngestMessage(
-              `VN ingest success: ${result.inserted_readings || 0} readings, ${result.generated_alerts || 0} alerts${
+              `VN ingest success: ${result.inserted_readings || 0} new readings, ${result.skipped_duplicates || 0} duplicates skipped, ${result.generated_alerts || 0} alerts${
                 station?.station_id ? ` (${station.station_id})` : ""
               }`
             );

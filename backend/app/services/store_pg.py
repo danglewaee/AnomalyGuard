@@ -27,6 +27,17 @@ class PostgresStore:
         )
         self.db.commit()
 
+    def existing_reading_timestamps(self, station_id: str, timestamps: list[datetime]) -> set[datetime]:
+        if not timestamps:
+            return set()
+
+        stmt = select(ReadingRecord.timestamp).where(
+            ReadingRecord.station_id == station_id,
+            ReadingRecord.timestamp.in_(timestamps),
+        )
+        rows = self.db.scalars(stmt).all()
+        return set(rows)
+
     def add_alert(self, alert: AnomalyAlert, explanation_text: str = "") -> None:
         self.db.merge(
             AlertRecord(

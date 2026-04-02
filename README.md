@@ -102,6 +102,7 @@ curl -X POST "http://localhost:8000/api/ingest/vn?station_id=mekong-can-tho&days
 ```
 
 The ingest endpoint now returns a job record immediately. Poll `GET /api/jobs/{job_id}` until it reaches `succeeded` or `failed`.
+Successful ingest job payloads now report both `inserted_readings` and `skipped_duplicates`, so repeated pulls of the same window are idempotent for API-feed ingestion.
 
 USGS feed:
 
