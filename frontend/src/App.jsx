@@ -59,6 +59,9 @@ function App() {
   const [reviewEvaluation, setReviewEvaluation] = useState(null);
   const [reviewInsightsBusy, setReviewInsightsBusy] = useState(false);
   const [reviewInsightsMessage, setReviewInsightsMessage] = useState("Login admin to inspect reviewed dataset quality.");
+  const [retrainingJobBusy, setRetrainingJobBusy] = useState(false);
+  const [retrainingJobMessage, setRetrainingJobMessage] = useState("");
+  const [lastRetrainingBundle, setLastRetrainingBundle] = useState(null);
 
   const navigate = useCallback((nextRoute) => {
     const normalized = normalizeRoute(nextRoute);
@@ -708,6 +711,88 @@ function App() {
     }
   };
 
+  const runRetrainingPreparation = async () => {
+    setRetrainingJobMessage("");
+    if (!authToken) {
+      setRetrainingJobMessage("Login admin first to prepare a retraining bundle.");
+      return;
+    }
+
+    setRetrainingJobBusy(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/alerts/labeled/retraining-jobs`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          station_id: stationId === "all" ? null : stationId,
+          since_minutes: sinceMinutes,
+          limit: 1000,
+          recent_count: 50,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setRetrainingJobMessage(body.detail || "Retraining preparation failed to start.");
+        return;
+      }
+
+      const jobId = body.id;
+      let jobFinished = false;
+      setRetrainingJobMessage(`Retraining bundle job queued (${jobId}).`);
+
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        const jobRes = await fetch(`${API_BASE}/api/jobs/${jobId}`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        const jobBody = await jobRes.json();
+        if (!jobRes.ok) {
+          setRetrainingJobMessage(jobBody.detail || "Cannot read retraining job status.");
+          break;
+        }
+
+        if (jobBody.status === "queued") {
+          setRetrainingJobMessage(`Retraining bundle job queued (${jobId}).`);
+          continue;
+        }
+        if (jobBody.status === "running") {
+          setRetrainingJobMessage(`Retraining bundle job running (${jobId})...`);
+          continue;
+        }
+        if (jobBody.status === "failed") {
+          setRetrainingJobMessage(jobBody.error_message || "Retraining bundle job failed.");
+          jobFinished = true;
+          break;
+        }
+        if (jobBody.status === "succeeded") {
+          const result = jobBody.result_payload || {};
+          setLastRetrainingBundle(result);
+          await loadReviewInsights(stationId, sinceMinutes, { suppressErrors: true, silentSuccess: true });
+          const manifestId = result.manifest?.manifest_id || "training bundle";
+          const recommendation = result.recommendation || "hold";
+          const mlflowSuffix = result.mlflow_run_id ? ` MLflow ${result.mlflow_run_id}.` : "";
+          setRetrainingJobMessage(
+            `Prepared ${manifestId} with recommendation ${recommendation}.${mlflowSuffix}`
+          );
+          jobFinished = true;
+          break;
+        }
+      }
+
+      if (!jobFinished) {
+        setRetrainingJobMessage(`Retraining bundle job still running (${jobId}). Check again shortly.`);
+      }
+    } catch {
+      setRetrainingJobMessage("Cannot reach backend for retraining bundle preparation.");
+    } finally {
+      setRetrainingJobBusy(false);
+    }
+  };
+
   const filteredReadings = useMemo(() => {
     if (stationId === "all") return readings;
     return readings.filter((reading) => reading.station_id === stationId);
@@ -819,6 +904,10 @@ function App() {
           reviewInsightsBusy={reviewInsightsBusy}
           reviewInsightsMessage={reviewInsightsMessage}
           onRefreshReviewInsights={() => loadReviewInsights(stationId, sinceMinutes, { silentSuccess: false })}
+          retrainingJobBusy={retrainingJobBusy}
+          retrainingJobMessage={retrainingJobMessage}
+          lastRetrainingBundle={lastRetrainingBundle}
+          onPrepareRetraining={runRetrainingPreparation}
           alertHistoryById={alertHistoryById}
           expandedHistoryAlertId={expandedHistoryAlertId}
           historyBusyId={historyBusyId}

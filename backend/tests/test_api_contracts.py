@@ -417,6 +417,59 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("review_label", response.text)
         self.assertIn("false_positive", response.text)
 
+    async def test_prepare_retraining_job_returns_queued_job_and_enqueues_background_task(self) -> None:
+        created_jobs: list[dict] = []
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def create_job(self, job_id: str, job_type: str, requested_by: str, parameters: dict | None = None) -> JobStatus:
+                created_jobs.append(
+                    {
+                        "job_id": job_id,
+                        "job_type": job_type,
+                        "requested_by": requested_by,
+                        "parameters": parameters or {},
+                    }
+                )
+                now = datetime.now(UTC)
+                return JobStatus(
+                    id=job_id,
+                    job_type=job_type,
+                    status="queued",
+                    requested_by=requested_by,
+                    created_at=now,
+                    updated_at=now,
+                    parameters=parameters or {},
+                )
+
+            def update_job_status(self, *args: object, **kwargs: object) -> JobStatus | None:
+                raise AssertionError("update_job_status should not be called on a successful enqueue")
+
+        send_task = MagicMock()
+
+        with patch.object(alert_routes, "PostgresStore", FakeStore), patch.object(alert_routes.celery_app, "send_task", send_task):
+            response = await self.client.post(
+                "/api/alerts/labeled/retraining-jobs",
+                json={
+                    "station_id": "mekong-can-tho",
+                    "since_minutes": 10080,
+                    "limit": 1000,
+                    "recent_count": 50,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(payload["job_type"], "prepare_retraining_run")
+        self.assertEqual(created_jobs[0]["requested_by"], "test-admin")
+        self.assertEqual(created_jobs[0]["parameters"]["recent_count"], 50)
+        send_task.assert_called_once()
+        self.assertEqual(send_task.call_args.args[0], "tasks.prepare_reviewed_alert_training_job")
+        self.assertEqual(send_task.call_args.kwargs["args"], ["mekong-can-tho", 10080, 1000, 50])
+
     async def test_retraining_manifest_reports_balance_and_export_urls(self) -> None:
         now = datetime.now(UTC)
         manifest_alerts = [

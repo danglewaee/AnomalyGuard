@@ -154,6 +154,13 @@ class ReviewedAlertReadinessResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class RetrainingJobRequest(BaseModel):
+    station_id: str | None = None
+    since_minutes: int | None = 10080
+    limit: int = Field(default=1000, ge=1, le=5000)
+    recent_count: int = Field(default=50, ge=1, le=500)
+
+
 class DeviceTelemetry(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 

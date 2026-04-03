@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from io import StringIO
 import json
 from typing import Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
@@ -15,7 +16,9 @@ from app.schemas import (
     AlertHistoryEntry,
     AlertReviewUpdate,
     LabeledAlertExportResponse,
+    JobStatus,
     RetrainingManifestResponse,
+    RetrainingJobRequest,
     ReviewedAlertEvaluationResponse,
     ReviewedAlertReadinessResponse,
 )
@@ -23,6 +26,7 @@ from app.services.alert_pipeline import ensure_valid_station
 from app.services.reviewed_alert_evaluation import build_reviewed_alert_evaluation
 from app.services.reviewed_alert_readiness import build_reviewed_alert_readiness
 from app.services.retraining_manifest import build_retraining_manifest
+from app.celery_app import celery_app
 from app.services.store_pg import PostgresStore
 
 
@@ -62,6 +66,39 @@ def latest_alerts(
     ensure_valid_station(station_id)
     data = PostgresStore(db).latest_alerts(limit=limit, station_id=station_id, since_minutes=since_minutes)
     return [alert.model_dump(mode="json") for alert in data]
+
+
+@router.post("/api/alerts/labeled/retraining-jobs", response_model=JobStatus)
+def prepare_retraining_job(
+    payload: RetrainingJobRequest,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_admin),
+) -> dict:
+    ensure_valid_station(payload.station_id)
+    job_id = str(uuid4())
+    job = PostgresStore(db).create_job(
+        job_id=job_id,
+        job_type="prepare_retraining_run",
+        requested_by=user.get("sub", "admin"),
+        parameters={
+            "station_id": payload.station_id or "",
+            "since_minutes": payload.since_minutes,
+            "limit": payload.limit,
+            "recent_count": payload.recent_count,
+        },
+    )
+    try:
+        celery_app.send_task(
+            "tasks.prepare_reviewed_alert_training_job",
+            args=[payload.station_id, payload.since_minutes, payload.limit, payload.recent_count],
+            task_id=job_id,
+        )
+    except Exception as exc:
+        failed = PostgresStore(db).update_job_status(job_id, "failed", error_message=str(exc))
+        if failed is None:
+            raise
+        return failed.model_dump(mode="json")
+    return job.model_dump(mode="json")
 
 
 @router.get("/api/alerts/labeled/export", response_model=LabeledAlertExportResponse)

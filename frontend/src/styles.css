@@ -599,6 +599,17 @@ h3 {
   gap: 14px;
 }
 
+.healthActionRow,
+.bundleSummary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.reviewHealthMessage {
+  margin-top: 6px;
+}
+
 .healthSummaryGrid,
 .healthGrid,
 .driftGrid,
@@ -620,6 +631,7 @@ h3 {
 .healthStatCard,
 .healthCard,
 .driftCard,
+.bundleSummaryCard,
 .checkItem,
 .warningItem {
   border-radius: 14px;
@@ -716,6 +728,18 @@ h3 {
   border-color: #eedfc8;
   color: #6e4c18;
   line-height: 1.5;
+}
+
+.bundleSummaryCard {
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
+.bundleSummaryCard strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.05rem;
+  color: #16324d;
 }
 
 .communityGrid {

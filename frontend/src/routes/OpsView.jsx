@@ -85,6 +85,10 @@ function OpsView({
   reviewInsightsBusy,
   reviewInsightsMessage,
   onRefreshReviewInsights,
+  retrainingJobBusy,
+  retrainingJobMessage,
+  lastRetrainingBundle,
+  onPrepareRetraining,
   alertHistoryById,
   expandedHistoryAlertId,
   historyBusyId,
@@ -281,10 +285,18 @@ function OpsView({
               {reviewInsightsMessage ||
                 "This panel summarizes whether reviewed alerts are balanced and stable enough for retraining."}
             </div>
+            <div className="muted tiny reviewHealthMessage">
+              {retrainingJobMessage || "Prepare a retraining bundle once the reviewed dataset looks stable."}
+            </div>
           </div>
-          <button className="inlineButton ghost" onClick={onRefreshReviewInsights} disabled={reviewInsightsBusy || !authToken}>
-            {reviewInsightsBusy ? "Refreshing..." : "Refresh Health"}
-          </button>
+          <div className="healthActionRow">
+            <button className="inlineButton ghost" onClick={onRefreshReviewInsights} disabled={reviewInsightsBusy || !authToken}>
+              {reviewInsightsBusy ? "Refreshing..." : "Refresh Health"}
+            </button>
+            <button className="inlineButton subtle" onClick={onPrepareRetraining} disabled={retrainingJobBusy || !authToken}>
+              {retrainingJobBusy ? "Preparing..." : "Prepare Training Run"}
+            </button>
+          </div>
         </div>
 
         {!authToken ? (
@@ -409,6 +421,31 @@ function OpsView({
                 )}
               </div>
             </div>
+
+            {lastRetrainingBundle ? (
+              <div className="bundleSummary">
+                <div className="bundleSummaryCard">
+                  <span>Last Prepared Bundle</span>
+                  <strong>{lastRetrainingBundle.manifest?.manifest_id || "-"}</strong>
+                  <div className="muted tiny">
+                    {lastRetrainingBundle.recommendation || "hold"} over {lastRetrainingBundle.manifest?.count ?? 0} reviewed alerts
+                  </div>
+                </div>
+                <div className="bundleSummaryCard">
+                  <span>Suggested Split</span>
+                  <strong>
+                    {lastRetrainingBundle.suggested_split?.train ?? 0}/{lastRetrainingBundle.suggested_split?.validation ?? 0}/
+                    {lastRetrainingBundle.suggested_split?.test ?? 0}
+                  </strong>
+                  <div className="muted tiny">train / validation / test</div>
+                </div>
+                <div className="bundleSummaryCard">
+                  <span>Recommended Threshold</span>
+                  <strong>{formatScore(lastRetrainingBundle.recommended_threshold)}</strong>
+                  <div className="muted tiny">{lastRetrainingBundle.mlflow_run_id || "No MLflow run id available"}</div>
+                </div>
+              </div>
+            ) : null}
           </>
         )}
       </section>
