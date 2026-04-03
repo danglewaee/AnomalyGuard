@@ -60,6 +60,24 @@ class LabeledAlertExportResponse(BaseModel):
     items: List[AnomalyAlert] = Field(default_factory=list)
 
 
+class RetrainingManifestResponse(BaseModel):
+    generated_at: datetime
+    manifest_id: str
+    fingerprint: str
+    count: int
+    label_filter: Literal["true_anomaly", "false_positive"] | None = None
+    station_id: str | None = None
+    since_minutes: int | None = None
+    label_counts: Dict[str, int] = Field(default_factory=dict)
+    station_counts: Dict[str, int] = Field(default_factory=dict)
+    earliest_reviewed_at: datetime | None = None
+    latest_reviewed_at: datetime | None = None
+    suggested_split: Dict[str, int] = Field(default_factory=dict)
+    ready_for_training: bool = False
+    warnings: List[str] = Field(default_factory=list)
+    export_urls: Dict[str, str] = Field(default_factory=dict)
+
+
 class DeviceTelemetry(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 

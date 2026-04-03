@@ -417,6 +417,74 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("review_label", response.text)
         self.assertIn("false_positive", response.text)
 
+    async def test_retraining_manifest_reports_balance_and_export_urls(self) -> None:
+        now = datetime.now(UTC)
+        manifest_alerts = [
+            AnomalyAlert(
+                id="alert-manifest-1",
+                timestamp=now - timedelta(hours=3),
+                station_id="mekong-can-tho",
+                severity="medium",
+                score=0.61,
+                reasons=["turbidity outside safe range"],
+                feature_contributions={"turbidity": 1.2},
+                incident_status="acknowledged",
+                incident_note="",
+                incident_updated_at=now - timedelta(hours=2),
+                review_label="true_anomaly",
+                review_note="Confirmed",
+                reviewed_at=now - timedelta(hours=2),
+                reviewed_by="test-admin",
+            ),
+            AnomalyAlert(
+                id="alert-manifest-2",
+                timestamp=now - timedelta(hours=2),
+                station_id="saigon-thu-duc",
+                severity="low",
+                score=0.42,
+                reasons=["statistical deviation from recent baseline"],
+                feature_contributions={"tds": 1.0},
+                incident_status="open",
+                incident_note="",
+                incident_updated_at=now - timedelta(hours=1, minutes=30),
+                review_label="false_positive",
+                review_note="Sensor cleanout",
+                reviewed_at=now - timedelta(hours=1),
+                reviewed_by="test-admin",
+            ),
+        ]
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def reviewed_alerts(
+                self,
+                limit: int,
+                *,
+                label: str | None = None,
+                station_id: str | None = None,
+                since_minutes: int | None = None,
+            ) -> list[AnomalyAlert]:
+                return manifest_alerts
+
+        with patch.object(alert_routes, "PostgresStore", FakeStore):
+            response = await self.client.get(
+                "/api/alerts/labeled/manifest",
+                params={"station_id": "mekong-can-tho", "since_minutes": 720, "limit": 100},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["station_id"], "mekong-can-tho")
+        self.assertEqual(payload["label_counts"]["true_anomaly"], 1)
+        self.assertEqual(payload["label_counts"]["false_positive"], 1)
+        self.assertIn("json", payload["export_urls"])
+        self.assertIn("csv", payload["export_urls"])
+        self.assertTrue(payload["manifest_id"].startswith("labeled-alerts-"))
+        self.assertGreater(len(payload["warnings"]), 0)
+
     async def test_community_overview_filters_resolved_alerts_and_uses_selected_profile(self) -> None:
         now = datetime.now(UTC)
         stations = [

@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.dependencies import get_current_user, require_admin
 from app.runtime import broadcast
-from app.schemas import AlertReviewUpdate, LabeledAlertExportResponse
+from app.schemas import AlertReviewUpdate, LabeledAlertExportResponse, RetrainingManifestResponse
 from app.services.alert_pipeline import ensure_valid_station
+from app.services.retraining_manifest import build_retraining_manifest
 from app.services.store_pg import PostgresStore
 
 
@@ -106,6 +107,32 @@ def export_labeled_alerts(
         "since_minutes": since_minutes,
         "items": [alert.model_dump(mode="json") for alert in alerts],
     }
+
+
+@router.get("/api/alerts/labeled/manifest", response_model=RetrainingManifestResponse)
+def retraining_manifest(
+    label: Literal["true_anomaly", "false_positive"] | None = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=5000),
+    station_id: str | None = Query(default=None),
+    since_minutes: int | None = Query(default=10080, ge=1, le=43200),
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> dict:
+    ensure_valid_station(station_id)
+    alerts = PostgresStore(db).reviewed_alerts(
+        limit=limit,
+        label=label,
+        station_id=station_id,
+        since_minutes=since_minutes,
+    )
+    manifest = build_retraining_manifest(
+        alerts=alerts,
+        label=label,
+        station_id=station_id,
+        since_minutes=since_minutes,
+        limit=limit,
+    )
+    return manifest.model_dump(mode="json")
 
 
 @router.get("/api/alerts/{alert_id}/explain")

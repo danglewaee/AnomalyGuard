@@ -88,6 +88,8 @@ Incident workflow endpoints:
   - body: `{"label":"true_anomaly"}` or `{"label":"false_positive"}`
 - `GET /api/alerts/labeled/export?format=csv`
   - admin-only export for reviewed alerts, optionally filtered by `label`, `station_id`, `since_minutes`, and `limit`
+- `GET /api/alerts/labeled/manifest`
+  - admin-only retraining manifest with dataset fingerprint, label balance, station coverage, suggested split, and export URLs
 
 Job status endpoint:
 
