@@ -17,9 +17,11 @@ from app.schemas import (
     LabeledAlertExportResponse,
     RetrainingManifestResponse,
     ReviewedAlertEvaluationResponse,
+    ReviewedAlertReadinessResponse,
 )
 from app.services.alert_pipeline import ensure_valid_station
 from app.services.reviewed_alert_evaluation import build_reviewed_alert_evaluation
+from app.services.reviewed_alert_readiness import build_reviewed_alert_readiness
 from app.services.retraining_manifest import build_retraining_manifest
 from app.services.store_pg import PostgresStore
 
@@ -162,6 +164,31 @@ def reviewed_alert_evaluation(
         since_minutes=since_minutes,
     )
     return evaluation.model_dump(mode="json")
+
+
+@router.get("/api/alerts/labeled/readiness", response_model=ReviewedAlertReadinessResponse)
+def reviewed_alert_readiness(
+    limit: int = Query(default=500, ge=1, le=5000),
+    recent_count: int = Query(default=50, ge=1, le=500),
+    station_id: str | None = Query(default=None),
+    since_minutes: int | None = Query(default=10080, ge=1, le=43200),
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> dict:
+    ensure_valid_station(station_id)
+    alerts = PostgresStore(db).reviewed_alerts(
+        limit=limit,
+        station_id=station_id,
+        since_minutes=since_minutes,
+    )
+    readiness = build_reviewed_alert_readiness(
+        alerts=alerts,
+        station_id=station_id,
+        since_minutes=since_minutes,
+        limit=limit,
+        recent_count=recent_count,
+    )
+    return readiness.model_dump(mode="json")
 
 
 @router.get("/api/alerts/{alert_id}/history", response_model=list[AlertHistoryEntry])

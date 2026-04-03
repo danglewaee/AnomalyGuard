@@ -641,6 +641,86 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload[1]["event_value"], "acknowledged")
         self.assertEqual(payload[2]["note"], "Confirmed at intake")
 
+    async def test_reviewed_alert_readiness_detects_recent_drift(self) -> None:
+        now = datetime.now(UTC)
+        readiness_alerts: list[AnomalyAlert] = []
+        for index in range(18):
+            is_true = index % 2 == 0
+            readiness_alerts.append(
+                AnomalyAlert(
+                    id=f"ready-base-{index}",
+                    timestamp=now - timedelta(hours=30 - index),
+                    station_id="mekong-can-tho" if index % 2 == 0 else "saigon-thu-duc",
+                    severity="medium" if is_true else "low",
+                    score=0.62 + (index * 0.01) if is_true else 0.41 + (index * 0.005),
+                    reasons=["baseline"],
+                    feature_contributions={"tds": 1.0},
+                    incident_status="acknowledged",
+                    incident_note="",
+                    incident_updated_at=now - timedelta(hours=29 - index),
+                    review_label="true_anomaly" if is_true else "false_positive",
+                    review_note="baseline review",
+                    reviewed_at=now - timedelta(days=4, hours=18 - index),
+                    reviewed_by="test-admin",
+                )
+            )
+
+        for index in range(6):
+            readiness_alerts.append(
+                AnomalyAlert(
+                    id=f"ready-recent-{index}",
+                    timestamp=now - timedelta(hours=6 - index),
+                    station_id="mekong-can-tho",
+                    severity="high",
+                    score=0.84 + (index * 0.01),
+                    reasons=["recent surge"],
+                    feature_contributions={"ph": 2.1},
+                    incident_status="acknowledged",
+                    incident_note="",
+                    incident_updated_at=now - timedelta(hours=5 - index),
+                    review_label="true_anomaly",
+                    review_note="recent review",
+                    reviewed_at=now - timedelta(hours=6 - index),
+                    reviewed_by="test-admin",
+                )
+            )
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def reviewed_alerts(
+                self,
+                limit: int,
+                *,
+                label: str | None = None,
+                station_id: str | None = None,
+                since_minutes: int | None = None,
+            ) -> list[AnomalyAlert]:
+                return readiness_alerts[:limit]
+
+        with patch.object(alert_routes, "PostgresStore", FakeStore):
+            response = await self.client.get(
+                "/api/alerts/labeled/readiness",
+                params={"since_minutes": 10080, "limit": 100, "recent_count": 6},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 24)
+        self.assertEqual(payload["recent_window_count"], 6)
+        self.assertEqual(payload["reference_window_count"], 18)
+        self.assertEqual(payload["recommendation"], "monitor")
+        self.assertFalse(payload["ready_for_training"])
+        self.assertGreaterEqual(payload["readiness_score"], 60)
+        self.assertEqual(payload["label_counts"]["true_anomaly"], 15)
+        self.assertEqual(payload["label_counts"]["false_positive"], 9)
+        self.assertEqual(payload["checks"][-1]["key"], "distribution_stability")
+        self.assertFalse(payload["checks"][-1]["passed"])
+        self.assertEqual(payload["label_distribution_shift"]["true_anomaly"]["absolute_delta"], 0.5)
+        self.assertEqual(payload["station_concentration_shift"]["absolute_delta"], 0.5)
+        self.assertGreaterEqual(len(payload["warnings"]), 1)
+
     async def test_community_overview_filters_resolved_alerts_and_uses_selected_profile(self) -> None:
         now = datetime.now(UTC)
         stations = [

@@ -92,6 +92,8 @@ Incident workflow endpoints:
   - admin-only retraining manifest with dataset fingerprint, label balance, station coverage, suggested split, and export URLs
 - `GET /api/alerts/labeled/evaluation`
   - admin-only offline evaluation summary for reviewed alerts, including current precision, severity breakdown, and score-threshold sweep
+- `GET /api/alerts/labeled/readiness`
+  - admin-only retraining readiness and drift summary for reviewed alerts, including recommendation, label-mix drift, score shift, and station concentration shift
 - `GET /api/alerts/{alert_id}/history`
   - admin-only operator timeline for detection, incident-state changes, and review labels with notes and actors
 

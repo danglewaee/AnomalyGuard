@@ -121,6 +121,39 @@ class AlertHistoryEntry(BaseModel):
     created_at: datetime
 
 
+class DriftMetric(BaseModel):
+    reference: float | None = None
+    candidate: float | None = None
+    absolute_delta: float | None = None
+
+
+class ReadinessCheck(BaseModel):
+    key: str
+    passed: bool = False
+    detail: str = ""
+
+
+class ReviewedAlertReadinessResponse(BaseModel):
+    generated_at: datetime
+    count: int
+    station_id: str | None = None
+    since_minutes: int | None = None
+    recent_window_count: int = 0
+    reference_window_count: int = 0
+    ready_for_training: bool = False
+    recommendation: Literal["hold", "monitor", "ready"] = "hold"
+    readiness_score: int = 0
+    current_precision: float | None = None
+    recommended_threshold: float | None = None
+    label_counts: Dict[str, int] = Field(default_factory=dict)
+    station_counts: Dict[str, int] = Field(default_factory=dict)
+    checks: List[ReadinessCheck] = Field(default_factory=list)
+    label_distribution_shift: Dict[str, DriftMetric] = Field(default_factory=dict)
+    mean_score_shift: DriftMetric | None = None
+    station_concentration_shift: DriftMetric | None = None
+    warnings: List[str] = Field(default_factory=list)
+
+
 class DeviceTelemetry(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
