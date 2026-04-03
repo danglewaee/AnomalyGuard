@@ -485,6 +485,91 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(payload["manifest_id"].startswith("labeled-alerts-"))
         self.assertGreater(len(payload["warnings"]), 0)
 
+    async def test_reviewed_alert_evaluation_reports_precision_and_threshold(self) -> None:
+        now = datetime.now(UTC)
+        evaluation_alerts = [
+            AnomalyAlert(
+                id="eval-1",
+                timestamp=now - timedelta(hours=4),
+                station_id="mekong-can-tho",
+                severity="medium",
+                score=0.61,
+                reasons=["turbidity outside safe range"],
+                feature_contributions={"turbidity": 1.3},
+                incident_status="acknowledged",
+                incident_note="",
+                incident_updated_at=now - timedelta(hours=3),
+                review_label="true_anomaly",
+                review_note="Confirmed in field",
+                reviewed_at=now - timedelta(hours=2),
+                reviewed_by="test-admin",
+            ),
+            AnomalyAlert(
+                id="eval-2",
+                timestamp=now - timedelta(hours=3),
+                station_id="mekong-can-tho",
+                severity="high",
+                score=0.82,
+                reasons=["ph outside safe range"],
+                feature_contributions={"ph": 2.4},
+                incident_status="acknowledged",
+                incident_note="",
+                incident_updated_at=now - timedelta(hours=2),
+                review_label="true_anomaly",
+                review_note="Confirmed at intake",
+                reviewed_at=now - timedelta(hours=1, minutes=30),
+                reviewed_by="test-admin",
+            ),
+            AnomalyAlert(
+                id="eval-3",
+                timestamp=now - timedelta(hours=2),
+                station_id="mekong-can-tho",
+                severity="low",
+                score=0.49,
+                reasons=["statistical deviation from recent baseline"],
+                feature_contributions={"tds": 1.0},
+                incident_status="open",
+                incident_note="",
+                incident_updated_at=now - timedelta(hours=1, minutes=45),
+                review_label="false_positive",
+                review_note="Maintenance drift",
+                reviewed_at=now - timedelta(hours=1),
+                reviewed_by="test-admin",
+            ),
+        ]
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def reviewed_alerts(
+                self,
+                limit: int,
+                *,
+                label: str | None = None,
+                station_id: str | None = None,
+                since_minutes: int | None = None,
+            ) -> list[AnomalyAlert]:
+                return evaluation_alerts
+
+        with patch.object(alert_routes, "PostgresStore", FakeStore):
+            response = await self.client.get(
+                "/api/alerts/labeled/evaluation",
+                params={"station_id": "mekong-can-tho", "since_minutes": 720, "limit": 100},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 3)
+        self.assertEqual(payload["station_id"], "mekong-can-tho")
+        self.assertEqual(payload["current_alert_threshold"], 0.45)
+        self.assertEqual(payload["current_precision"], 0.667)
+        self.assertEqual(payload["label_counts"]["true_anomaly"], 2)
+        self.assertEqual(payload["label_counts"]["false_positive"], 1)
+        self.assertEqual(payload["recommended_threshold"], 0.61)
+        self.assertEqual(payload["severity_breakdown"]["medium"]["precision"], 1.0)
+        self.assertGreaterEqual(len(payload["threshold_sweep"]), 1)
+
     async def test_community_overview_filters_resolved_alerts_and_uses_selected_profile(self) -> None:
         now = datetime.now(UTC)
         stations = [

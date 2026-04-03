@@ -11,8 +11,14 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.dependencies import get_current_user, require_admin
 from app.runtime import broadcast
-from app.schemas import AlertReviewUpdate, LabeledAlertExportResponse, RetrainingManifestResponse
+from app.schemas import (
+    AlertReviewUpdate,
+    LabeledAlertExportResponse,
+    RetrainingManifestResponse,
+    ReviewedAlertEvaluationResponse,
+)
 from app.services.alert_pipeline import ensure_valid_station
+from app.services.reviewed_alert_evaluation import build_reviewed_alert_evaluation
 from app.services.retraining_manifest import build_retraining_manifest
 from app.services.store_pg import PostgresStore
 
@@ -133,6 +139,28 @@ def retraining_manifest(
         limit=limit,
     )
     return manifest.model_dump(mode="json")
+
+
+@router.get("/api/alerts/labeled/evaluation", response_model=ReviewedAlertEvaluationResponse)
+def reviewed_alert_evaluation(
+    limit: int = Query(default=500, ge=1, le=5000),
+    station_id: str | None = Query(default=None),
+    since_minutes: int | None = Query(default=10080, ge=1, le=43200),
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> dict:
+    ensure_valid_station(station_id)
+    alerts = PostgresStore(db).reviewed_alerts(
+        limit=limit,
+        station_id=station_id,
+        since_minutes=since_minutes,
+    )
+    evaluation = build_reviewed_alert_evaluation(
+        alerts=alerts,
+        station_id=station_id,
+        since_minutes=since_minutes,
+    )
+    return evaluation.model_dump(mode="json")
 
 
 @router.get("/api/alerts/{alert_id}/explain")

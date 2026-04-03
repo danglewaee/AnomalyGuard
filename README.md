@@ -90,6 +90,8 @@ Incident workflow endpoints:
   - admin-only export for reviewed alerts, optionally filtered by `label`, `station_id`, `since_minutes`, and `limit`
 - `GET /api/alerts/labeled/manifest`
   - admin-only retraining manifest with dataset fingerprint, label balance, station coverage, suggested split, and export URLs
+- `GET /api/alerts/labeled/evaluation`
+  - admin-only offline evaluation summary for reviewed alerts, including current precision, severity breakdown, and score-threshold sweep
 
 Job status endpoint:
 

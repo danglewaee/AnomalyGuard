@@ -78,6 +78,38 @@ class RetrainingManifestResponse(BaseModel):
     export_urls: Dict[str, str] = Field(default_factory=dict)
 
 
+class SeverityEvaluationBreakdown(BaseModel):
+    reviewed_count: int = 0
+    true_anomaly: int = 0
+    false_positive: int = 0
+    precision: float | None = None
+
+
+class ThresholdEvaluationPoint(BaseModel):
+    threshold: float
+    predicted_positive_count: int = 0
+    true_positive: int = 0
+    false_positive: int = 0
+    precision: float | None = None
+    recall: float | None = None
+    f1: float | None = None
+
+
+class ReviewedAlertEvaluationResponse(BaseModel):
+    generated_at: datetime
+    count: int
+    station_id: str | None = None
+    since_minutes: int | None = None
+    current_alert_threshold: float
+    current_precision: float | None = None
+    label_counts: Dict[str, int] = Field(default_factory=dict)
+    severity_breakdown: Dict[str, SeverityEvaluationBreakdown] = Field(default_factory=dict)
+    recommended_threshold: float | None = None
+    recommended_threshold_metrics: ThresholdEvaluationPoint | None = None
+    threshold_sweep: List[ThresholdEvaluationPoint] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class DeviceTelemetry(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
