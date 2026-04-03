@@ -20,7 +20,7 @@ from app.api.routes import ingest as ingest_routes
 from app.api.routes import incidents as incident_routes
 from app.api.routes import jobs as jobs_routes
 import app.main as main
-from app.schemas import AnomalyAlert, JobStatus, StationProfile, WaterReading
+from app.schemas import AlertHistoryEntry, AnomalyAlert, JobStatus, StationProfile, WaterReading
 
 
 UTC = timezone.utc
@@ -569,6 +569,77 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["recommended_threshold"], 0.61)
         self.assertEqual(payload["severity_breakdown"]["medium"]["precision"], 1.0)
         self.assertGreaterEqual(len(payload["threshold_sweep"]), 1)
+
+    async def test_alert_history_returns_operator_timeline(self) -> None:
+        now = datetime.now(UTC)
+        alert = AnomalyAlert(
+            id="alert-history",
+            timestamp=now - timedelta(hours=2),
+            station_id="mekong-can-tho",
+            severity="medium",
+            score=0.58,
+            reasons=["turbidity outside safe range"],
+            feature_contributions={"turbidity": 1.4},
+            incident_status="acknowledged",
+            incident_note="Field check started",
+            incident_updated_at=now - timedelta(minutes=45),
+            review_label="true_anomaly",
+            review_note="Confirmed at intake",
+            reviewed_at=now - timedelta(minutes=20),
+            reviewed_by="test-admin",
+        )
+        timeline = [
+            AlertHistoryEntry(
+                id=1,
+                alert_id="alert-history",
+                station_id="mekong-can-tho",
+                event_type="detected",
+                event_value="medium",
+                note="",
+                changed_by="system",
+                created_at=now - timedelta(hours=2),
+            ),
+            AlertHistoryEntry(
+                id=2,
+                alert_id="alert-history",
+                station_id="mekong-can-tho",
+                event_type="incident_status",
+                event_value="acknowledged",
+                note="Field check started",
+                changed_by="test-admin",
+                created_at=now - timedelta(minutes=45),
+            ),
+            AlertHistoryEntry(
+                id=3,
+                alert_id="alert-history",
+                station_id="mekong-can-tho",
+                event_type="review_label",
+                event_value="true_anomaly",
+                note="Confirmed at intake",
+                changed_by="test-admin",
+                created_at=now - timedelta(minutes=20),
+            ),
+        ]
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def alert_with_incident(self, alert_id: str) -> AnomalyAlert | None:
+                return alert if alert_id == "alert-history" else None
+
+            def alert_history(self, alert_id: str, limit: int = 25) -> list[AlertHistoryEntry]:
+                return timeline[:limit]
+
+        with patch.object(alert_routes, "PostgresStore", FakeStore):
+            response = await self.client.get("/api/alerts/alert-history/history", params={"limit": 25})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 3)
+        self.assertEqual(payload[0]["event_type"], "detected")
+        self.assertEqual(payload[1]["event_value"], "acknowledged")
+        self.assertEqual(payload[2]["note"], "Confirmed at intake")
 
     async def test_community_overview_filters_resolved_alerts_and_uses_selected_profile(self) -> None:
         now = datetime.now(UTC)

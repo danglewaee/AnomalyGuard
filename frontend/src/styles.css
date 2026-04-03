@@ -17,7 +17,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -441,6 +442,23 @@ h3 {
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 10px;
+}
+
+.noteComposer {
+  margin-top: 12px;
+}
+
+.noteComposer label {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.noteComposer input {
+  width: 100%;
+  border: 1px solid #d6e0ec;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
 }
 
 .reviewBadge {
@@ -884,6 +902,39 @@ h3 {
 .storyGrid {
   grid-template-columns: 1fr;
   margin-top: 12px;
+}
+
+.historyPanel {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #e7eef5;
+  padding-top: 12px;
+}
+
+.historyEntry {
+  border-radius: 12px;
+  border: 1px solid #e5edf5;
+  padding: 10px 12px;
+  background: #f9fbfe;
+}
+
+.historyEntryHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.historyTitle {
+  color: #18344f;
+}
+
+.historyNote {
+  margin-top: 6px;
+  color: #42566a;
+  line-height: 1.5;
 }
 
 .storyCard h3 {

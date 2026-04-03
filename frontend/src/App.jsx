@@ -51,6 +51,10 @@ function App() {
   const [incidentMessage, setIncidentMessage] = useState("");
   const [reviewExportBusy, setReviewExportBusy] = useState(false);
   const [reviewExportMessage, setReviewExportMessage] = useState("");
+  const [alertActionNotes, setAlertActionNotes] = useState({});
+  const [alertHistoryById, setAlertHistoryById] = useState({});
+  const [expandedHistoryAlertId, setExpandedHistoryAlertId] = useState("");
+  const [historyBusyId, setHistoryBusyId] = useState("");
 
   const navigate = useCallback((nextRoute) => {
     const normalized = normalizeRoute(nextRoute);
@@ -437,6 +441,7 @@ function App() {
       return;
     }
 
+    const note = (alertActionNotes[alertId] || "").trim();
     setIncidentBusyId(alertId);
     try {
       const res = await fetch(`${API_BASE}/api/incidents/${alertId}/${action}`, {
@@ -445,7 +450,7 @@ function App() {
           Authorization: `Bearer ${authToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ note: "" }),
+        body: JSON.stringify({ note }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -460,7 +465,13 @@ function App() {
       };
       upsertAlert(body);
       loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
-      setIncidentMessage(`Incident ${actionCopy[action] || "updated"} for ${body.station_id}.`);
+      if (alertHistoryById[alertId] || expandedHistoryAlertId === alertId) {
+        await loadAlertHistory(alertId, { force: true, suppressErrors: true });
+      }
+      setAlertActionNotes((previous) => ({ ...previous, [alertId]: "" }));
+      setIncidentMessage(
+        `Incident ${actionCopy[action] || "updated"} for ${body.station_id}${note ? ". Note saved." : "."}`
+      );
     } catch {
       setIncidentMessage("Cannot reach backend for incident update.");
     } finally {
@@ -475,6 +486,7 @@ function App() {
       return;
     }
 
+    const note = (alertActionNotes[alertId] || "").trim();
     setIncidentBusyId(alertId);
     try {
       const res = await fetch(`${API_BASE}/api/alerts/${alertId}/review`, {
@@ -483,7 +495,7 @@ function App() {
           Authorization: `Bearer ${authToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ label, note: "" }),
+        body: JSON.stringify({ label, note }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -493,8 +505,14 @@ function App() {
 
       upsertAlert(body);
       loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
+      if (alertHistoryById[alertId] || expandedHistoryAlertId === alertId) {
+        await loadAlertHistory(alertId, { force: true, suppressErrors: true });
+      }
+      setAlertActionNotes((previous) => ({ ...previous, [alertId]: "" }));
       setIncidentMessage(
-        label === "false_positive" ? `Marked ${body.station_id} as false positive.` : `Confirmed anomaly for ${body.station_id}.`
+        label === "false_positive"
+          ? `Marked ${body.station_id} as false positive${note ? ". Note saved." : "."}`
+          : `Confirmed anomaly for ${body.station_id}${note ? ". Note saved." : "."}`
       );
     } catch {
       setIncidentMessage("Cannot reach backend for alert review.");
@@ -502,6 +520,59 @@ function App() {
       setIncidentBusyId("");
     }
   };
+
+  const loadAlertHistory = useCallback(
+    async (alertId, options = {}) => {
+      const { force = false, suppressErrors = false } = options;
+      if (!authToken) {
+        if (!suppressErrors) {
+          setIncidentMessage("Login admin first to load alert history.");
+        }
+        return;
+      }
+      if (!force && alertHistoryById[alertId]) {
+        return;
+      }
+
+      setHistoryBusyId(alertId);
+      try {
+        const res = await fetch(`${API_BASE}/api/alerts/${alertId}/history?limit=25`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          if (!suppressErrors) {
+            setIncidentMessage(body.detail || "Alert history load failed");
+          }
+          return;
+        }
+        setAlertHistoryById((previous) => ({ ...previous, [alertId]: body }));
+      } catch {
+        if (!suppressErrors) {
+          setIncidentMessage("Cannot reach backend for alert history.");
+        }
+      } finally {
+        setHistoryBusyId("");
+      }
+    },
+    [alertHistoryById, authToken]
+  );
+
+  const toggleAlertHistory = useCallback(
+    async (alertId) => {
+      if (expandedHistoryAlertId === alertId) {
+        setExpandedHistoryAlertId("");
+        return;
+      }
+      if (!authToken) {
+        setIncidentMessage("Login admin first to load alert history.");
+        return;
+      }
+      setExpandedHistoryAlertId(alertId);
+      await loadAlertHistory(alertId);
+    },
+    [authToken, expandedHistoryAlertId, loadAlertHistory]
+  );
 
   const runReviewedAlertExport = async () => {
     setReviewExportMessage("");
@@ -656,7 +727,15 @@ function App() {
           filteredAlerts={filteredAlerts}
           onIncidentAction={runIncidentAction}
           onReviewAction={runAlertReview}
+          alertActionNotes={alertActionNotes}
+          onAlertNoteChange={(alertId, note) => {
+            setAlertActionNotes((previous) => ({ ...previous, [alertId]: note }));
+          }}
           onExportReviewedAlerts={runReviewedAlertExport}
+          alertHistoryById={alertHistoryById}
+          expandedHistoryAlertId={expandedHistoryAlertId}
+          historyBusyId={historyBusyId}
+          onToggleAlertHistory={toggleAlertHistory}
           incidentBusyId={incidentBusyId}
           incidentMessage={incidentMessage}
           reviewExportBusy={reviewExportBusy}

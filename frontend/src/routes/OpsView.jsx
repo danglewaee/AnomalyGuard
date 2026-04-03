@@ -12,6 +12,19 @@ import RiskPill from "../components/RiskPill.jsx";
 import { DIRECTION_OPTIONS, TIME_WINDOW_OPTIONS, VN_STATIONS } from "../constants.js";
 import { alertImpactCopy, communityRiskFromOperatorSeverity, formatTimestamp } from "../lib/risk.js";
 
+function formatHistoryLabel(entry) {
+  if (entry.event_type === "detected") {
+    return `Alert detected (${entry.event_value})`;
+  }
+  if (entry.event_type === "incident_status") {
+    return `Incident ${entry.event_value}`;
+  }
+  if (entry.event_type === "review_label") {
+    return entry.event_value === "true_anomaly" ? "Marked true anomaly" : "Marked false positive";
+  }
+  return entry.event_value || entry.event_type;
+}
+
 function OpsView({
   connected,
   meta,
@@ -49,7 +62,13 @@ function OpsView({
   filteredAlerts,
   onIncidentAction,
   onReviewAction,
+  alertActionNotes,
+  onAlertNoteChange,
   onExportReviewedAlerts,
+  alertHistoryById,
+  expandedHistoryAlertId,
+  historyBusyId,
+  onToggleAlertHistory,
   incidentBusyId,
   incidentMessage,
   reviewExportBusy,
@@ -268,6 +287,10 @@ function OpsView({
             {filteredAlerts.map((alert) => {
               const incidentStatus = alert.incident_status || "open";
               const isBusy = incidentBusyId === alert.id;
+              const isHistoryBusy = historyBusyId === alert.id;
+              const isHistoryOpen = expandedHistoryAlertId === alert.id;
+              const history = alertHistoryById[alert.id] || [];
+              const noteValue = alertActionNotes[alert.id] || "";
               const reviewLabel = alert.review_label || "";
 
               return (
@@ -294,6 +317,17 @@ function OpsView({
                   ) : null}
                   {alert.incident_note ? <div className="muted tiny">{alert.incident_note}</div> : null}
                   {alert.review_note ? <div className="muted tiny">{alert.review_note}</div> : null}
+                  <div className="noteComposer">
+                    <label className="muted tiny" htmlFor={`alert-note-${alert.id}`}>
+                      Operator note
+                    </label>
+                    <input
+                      id={`alert-note-${alert.id}`}
+                      value={noteValue}
+                      onChange={(event) => onAlertNoteChange(alert.id, event.target.value)}
+                      placeholder="Add a field note before triage or review"
+                    />
+                  </div>
                   <div className="incidentActions">
                     {incidentStatus === "open" ? (
                       <button className="inlineButton" onClick={() => onIncidentAction(alert.id, "acknowledge")} disabled={isBusy || !authToken}>
@@ -324,7 +358,32 @@ function OpsView({
                     >
                       {isBusy && reviewLabel !== "false_positive" ? "Updating..." : "False Positive"}
                     </button>
+                    <button className="inlineButton ghost" onClick={() => onToggleAlertHistory(alert.id)} disabled={isHistoryBusy}>
+                      {isHistoryBusy ? "Loading..." : isHistoryOpen ? "Hide History" : "Show History"}
+                    </button>
                   </div>
+                  {isHistoryOpen ? (
+                    <div className="historyPanel">
+                      {isHistoryBusy ? (
+                        <div className="muted tiny">Loading operator timeline...</div>
+                      ) : history.length === 0 ? (
+                        <div className="muted tiny">No operator history recorded for this alert yet.</div>
+                      ) : (
+                        history.map((entry) => (
+                          <div key={`${alert.id}-history-${entry.id}`} className="historyEntry">
+                            <div className="historyEntryHead">
+                              <strong className="historyTitle">{formatHistoryLabel(entry)}</strong>
+                              <span className="muted tiny">{formatTimestamp(entry.created_at)}</span>
+                            </div>
+                            <div className="muted tiny">
+                              {entry.changed_by || "system"} | {entry.station_id}
+                            </div>
+                            {entry.note ? <div className="historyNote">{entry.note}</div> : null}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               );
             })}

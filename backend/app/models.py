@@ -52,6 +52,19 @@ class IncidentRecord(Base):
     reviewed_by: Mapped[str] = mapped_column(String(128), default="")
 
 
+class IncidentEventRecord(Base):
+    __tablename__ = "incident_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    alert_id: Mapped[str] = mapped_column(String(64), index=True)
+    station_id: Mapped[str] = mapped_column(String(128), index=True)
+    event_type: Mapped[str] = mapped_column(String(32), index=True)
+    event_value: Mapped[str] = mapped_column(String(64), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    changed_by: Mapped[str] = mapped_column(String(128), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class JobRecord(Base):
     __tablename__ = "jobs"
 

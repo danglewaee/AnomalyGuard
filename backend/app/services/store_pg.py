@@ -3,8 +3,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import AlertRecord, DeviceStateRecord, IncidentRecord, JobRecord, ReadingRecord
-from app.schemas import AnomalyAlert, JobStatus, StationProfile, WaterReading
+from app.models import AlertRecord, DeviceStateRecord, IncidentEventRecord, IncidentRecord, JobRecord, ReadingRecord
+from app.schemas import AlertHistoryEntry, AnomalyAlert, JobStatus, StationProfile, WaterReading
 from app.services.device_support import normalize_device_control
 from app.services.metrics import observe_job_queue_seconds, observe_job_run_seconds, record_job_status_transition
 
@@ -65,6 +65,15 @@ class PostgresStore:
                     status_note="",
                 )
             )
+            self._record_alert_history(
+                alert_id=alert.id,
+                station_id=alert.station_id,
+                event_type="detected",
+                event_value=alert.severity,
+                changed_by="system",
+                note="",
+                created_at=alert.timestamp,
+            )
         self.db.commit()
 
     def latest_readings(self, limit: int, station_id: str | None = None, since_minutes: int | None = None) -> list[WaterReading]:
@@ -124,6 +133,17 @@ class PostgresStore:
         ).all()
         return [self._alert_to_schema(alert_row, incident_row) for alert_row, incident_row in rows]
 
+    def alert_history(self, alert_id: str, limit: int = 25) -> list[AlertHistoryEntry]:
+        stmt = (
+            select(IncidentEventRecord)
+            .where(IncidentEventRecord.alert_id == alert_id)
+            .order_by(IncidentEventRecord.created_at.desc(), IncidentEventRecord.id.desc())
+            .limit(limit)
+        )
+        rows = self.db.scalars(stmt).all()
+        rows.reverse()
+        return [self._history_to_schema(row) for row in rows]
+
     def get_alert(self, alert_id: str) -> AlertRecord | None:
         return self.db.get(AlertRecord, alert_id)
 
@@ -171,6 +191,15 @@ class PostgresStore:
         elif status == "open":
             incident.resolved_at = None
 
+        self._record_alert_history(
+            alert_id=alert_id,
+            station_id=incident.station_id,
+            event_type="incident_status",
+            event_value=status,
+            changed_by=changed_by,
+            note=note,
+            created_at=now,
+        )
         self.db.commit()
         return self.alert_with_incident(alert_id)
 
@@ -197,6 +226,17 @@ class PostgresStore:
         incident.reviewed_at = now
         incident.reviewed_by = reviewed_by
         incident.updated_at = now
+        incident.last_changed_by = reviewed_by
+
+        self._record_alert_history(
+            alert_id=alert_id,
+            station_id=incident.station_id,
+            event_type="review_label",
+            event_value=label,
+            changed_by=reviewed_by,
+            note=note,
+            created_at=now,
+        )
 
         self.db.commit()
         return self.alert_with_incident(alert_id)
@@ -380,4 +420,39 @@ class PostgresStore:
             parameters=row.parameters or {},
             result_payload=row.result_payload or {},
             error_message=row.error_message or "",
+        )
+
+    def _record_alert_history(
+        self,
+        *,
+        alert_id: str,
+        station_id: str,
+        event_type: str,
+        event_value: str,
+        changed_by: str,
+        note: str,
+        created_at: datetime,
+    ) -> None:
+        self.db.add(
+            IncidentEventRecord(
+                alert_id=alert_id,
+                station_id=station_id,
+                event_type=event_type,
+                event_value=event_value,
+                note=note,
+                changed_by=changed_by,
+                created_at=created_at,
+            )
+        )
+
+    def _history_to_schema(self, row: IncidentEventRecord) -> AlertHistoryEntry:
+        return AlertHistoryEntry(
+            id=row.id,
+            alert_id=row.alert_id,
+            station_id=row.station_id,
+            event_type=row.event_type,
+            event_value=row.event_value,
+            note=row.note or "",
+            changed_by=row.changed_by or "",
+            created_at=row.created_at,
         )

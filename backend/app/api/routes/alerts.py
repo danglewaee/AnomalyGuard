@@ -12,6 +12,7 @@ from app.db import get_db
 from app.dependencies import get_current_user, require_admin
 from app.runtime import broadcast
 from app.schemas import (
+    AlertHistoryEntry,
     AlertReviewUpdate,
     LabeledAlertExportResponse,
     RetrainingManifestResponse,
@@ -161,6 +162,20 @@ def reviewed_alert_evaluation(
         since_minutes=since_minutes,
     )
     return evaluation.model_dump(mode="json")
+
+
+@router.get("/api/alerts/{alert_id}/history", response_model=list[AlertHistoryEntry])
+def alert_history(
+    alert_id: str,
+    limit: int = Query(default=25, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> list[dict]:
+    store = PostgresStore(db)
+    if store.alert_with_incident(alert_id) is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    history = store.alert_history(alert_id, limit=limit)
+    return [entry.model_dump(mode="json") for entry in history]
 
 
 @router.get("/api/alerts/{alert_id}/explain")

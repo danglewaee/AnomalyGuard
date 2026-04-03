@@ -110,6 +110,17 @@ class ReviewedAlertEvaluationResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class AlertHistoryEntry(BaseModel):
+    id: int
+    alert_id: str
+    station_id: str
+    event_type: Literal["detected", "incident_status", "review_label"]
+    event_value: str
+    note: str = ""
+    changed_by: str = ""
+    created_at: datetime
+
+
 class DeviceTelemetry(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
