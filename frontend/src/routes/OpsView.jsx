@@ -25,6 +25,21 @@ function formatHistoryLabel(entry) {
   return entry.event_value || entry.event_type;
 }
 
+function formatPct(value) {
+  if (value == null) return "-";
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatScore(value) {
+  if (value == null) return "-";
+  return Number(value).toFixed(3);
+}
+
+function driftSummary(metric, asPercent = false) {
+  if (!metric || metric.absolute_delta == null) return "-";
+  return asPercent ? `${Math.round(metric.absolute_delta * 100)} pts` : formatScore(metric.absolute_delta);
+}
+
 function OpsView({
   connected,
   meta,
@@ -65,6 +80,11 @@ function OpsView({
   alertActionNotes,
   onAlertNoteChange,
   onExportReviewedAlerts,
+  reviewReadiness,
+  reviewEvaluation,
+  reviewInsightsBusy,
+  reviewInsightsMessage,
+  onRefreshReviewInsights,
   alertHistoryById,
   expandedHistoryAlertId,
   historyBusyId,
@@ -251,6 +271,146 @@ function OpsView({
         <Metric title="TDS" value={latest ? `${latest.tds} ppm` : "-"} />
         <Metric title="Turbidity" value={latest ? `${latest.turbidity} NTU` : "-"} />
         <Metric title="DO" value={latest ? `${latest.do_mg_l} mg/L` : "-"} />
+      </section>
+
+      <section className="panel reviewHealthPanel">
+        <div className="sectionTitle">
+          <div>
+            <h2>Reviewed Dataset Health</h2>
+            <div className="muted tiny">
+              {reviewInsightsMessage ||
+                "This panel summarizes whether reviewed alerts are balanced and stable enough for retraining."}
+            </div>
+          </div>
+          <button className="inlineButton ghost" onClick={onRefreshReviewInsights} disabled={reviewInsightsBusy || !authToken}>
+            {reviewInsightsBusy ? "Refreshing..." : "Refresh Health"}
+          </button>
+        </div>
+
+        {!authToken ? (
+          <p className="muted">Login admin to load readiness, drift, and threshold evaluation.</p>
+        ) : !reviewReadiness || !reviewEvaluation ? (
+          <p className="muted">Waiting for reviewed dataset metrics...</p>
+        ) : (
+          <>
+            <div className="healthSummaryGrid">
+              <div className="healthStatCard">
+                <span>Recommendation</span>
+                <strong>{reviewReadiness.recommendation}</strong>
+                <div className={`healthBadge health-${reviewReadiness.recommendation}`}>
+                  {reviewReadiness.ready_for_training ? "training ready" : "needs operator review"}
+                </div>
+              </div>
+              <div className="healthStatCard">
+                <span>Readiness Score</span>
+                <strong>{reviewReadiness.readiness_score}</strong>
+                <div className="muted tiny">
+                  {reviewReadiness.reference_window_count} baseline / {reviewReadiness.recent_window_count} recent
+                </div>
+              </div>
+              <div className="healthStatCard">
+                <span>Current Precision</span>
+                <strong>{formatPct(reviewEvaluation.current_precision)}</strong>
+                <div className="muted tiny">{reviewEvaluation.count} reviewed alerts in scope</div>
+              </div>
+              <div className="healthStatCard">
+                <span>Recommended Threshold</span>
+                <strong>{formatScore(reviewEvaluation.recommended_threshold)}</strong>
+                <div className="muted tiny">Current alert threshold {formatScore(reviewEvaluation.current_alert_threshold)}</div>
+              </div>
+            </div>
+
+            <div className="healthGrid">
+              <div className="healthCard">
+                <h3>Readiness Checks</h3>
+                <div className="checkList">
+                  {(reviewReadiness.checks || []).map((check) => (
+                    <div key={check.key} className={`checkItem ${check.passed ? "passed" : "failed"}`}>
+                      <div className="checkItemHead">
+                        <strong>{check.key.replaceAll("_", " ")}</strong>
+                        <span>{check.passed ? "pass" : "review"}</span>
+                      </div>
+                      <div className="muted tiny">{check.detail}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="healthCard">
+                <h3>Drift Signals</h3>
+                <div className="driftGrid">
+                  <div className="driftCard">
+                    <span>True Label Drift</span>
+                    <strong>{driftSummary(reviewReadiness.label_distribution_shift?.true_anomaly, true)}</strong>
+                    <div className="muted tiny">
+                      {formatPct(reviewReadiness.label_distribution_shift?.true_anomaly?.reference)} baseline to{" "}
+                      {formatPct(reviewReadiness.label_distribution_shift?.true_anomaly?.candidate)} recent
+                    </div>
+                  </div>
+                  <div className="driftCard">
+                    <span>False Label Drift</span>
+                    <strong>{driftSummary(reviewReadiness.label_distribution_shift?.false_positive, true)}</strong>
+                    <div className="muted tiny">
+                      {formatPct(reviewReadiness.label_distribution_shift?.false_positive?.reference)} baseline to{" "}
+                      {formatPct(reviewReadiness.label_distribution_shift?.false_positive?.candidate)} recent
+                    </div>
+                  </div>
+                  <div className="driftCard">
+                    <span>Mean Score Shift</span>
+                    <strong>{driftSummary(reviewReadiness.mean_score_shift)}</strong>
+                    <div className="muted tiny">
+                      {formatScore(reviewReadiness.mean_score_shift?.reference)} baseline to{" "}
+                      {formatScore(reviewReadiness.mean_score_shift?.candidate)} recent
+                    </div>
+                  </div>
+                  <div className="driftCard">
+                    <span>Station Concentration</span>
+                    <strong>{driftSummary(reviewReadiness.station_concentration_shift, true)}</strong>
+                    <div className="muted tiny">
+                      {formatPct(reviewReadiness.station_concentration_shift?.reference)} baseline to{" "}
+                      {formatPct(reviewReadiness.station_concentration_shift?.candidate)} recent
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="healthCard">
+                <h3>Label Coverage</h3>
+                <div className="healthList">
+                  <div className="healthListItem">
+                    <span>true_anomaly</span>
+                    <strong>{reviewReadiness.label_counts?.true_anomaly ?? 0}</strong>
+                  </div>
+                  <div className="healthListItem">
+                    <span>false_positive</span>
+                    <strong>{reviewReadiness.label_counts?.false_positive ?? 0}</strong>
+                  </div>
+                  {Object.entries(reviewReadiness.station_counts || {}).map(([key, value]) => (
+                    <div key={key} className="healthListItem">
+                      <span>{key}</span>
+                      <strong>{value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="healthCard">
+                <h3>Warnings</h3>
+                {reviewReadiness.warnings?.length ? (
+                  <div className="warningList">
+                    {reviewReadiness.warnings.map((warning) => (
+                      <div key={warning} className="warningItem">
+                        {warning}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="muted tiny">No active warnings for the reviewed dataset.</div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="grid">

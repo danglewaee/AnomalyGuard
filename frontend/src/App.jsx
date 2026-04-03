@@ -55,6 +55,10 @@ function App() {
   const [alertHistoryById, setAlertHistoryById] = useState({});
   const [expandedHistoryAlertId, setExpandedHistoryAlertId] = useState("");
   const [historyBusyId, setHistoryBusyId] = useState("");
+  const [reviewReadiness, setReviewReadiness] = useState(null);
+  const [reviewEvaluation, setReviewEvaluation] = useState(null);
+  const [reviewInsightsBusy, setReviewInsightsBusy] = useState(false);
+  const [reviewInsightsMessage, setReviewInsightsMessage] = useState("Login admin to inspect reviewed dataset quality.");
 
   const navigate = useCallback((nextRoute) => {
     const normalized = normalizeRoute(nextRoute);
@@ -154,6 +158,66 @@ function App() {
       .catch(() => {});
   }, []);
 
+  const loadReviewInsights = useCallback(
+    async (selectedStation = stationId, selectedWindow = sinceMinutes, options = {}) => {
+      const { suppressErrors = false, silentSuccess = true } = options;
+      if (!authToken) {
+        setReviewReadiness(null);
+        setReviewEvaluation(null);
+        setReviewInsightsMessage("Login admin to inspect reviewed dataset quality.");
+        return;
+      }
+
+      const baseParams = new URLSearchParams({
+        since_minutes: String(selectedWindow),
+        limit: "1000",
+      });
+      if (selectedStation !== "all") {
+        baseParams.set("station_id", selectedStation);
+      }
+      const readinessParams = new URLSearchParams(baseParams);
+      readinessParams.set("recent_count", "50");
+
+      setReviewInsightsBusy(true);
+      try {
+        const headers = { Authorization: `Bearer ${authToken}` };
+        const [readinessRes, evaluationRes] = await Promise.all([
+          fetch(`${API_BASE}/api/alerts/labeled/readiness?${readinessParams.toString()}`, { headers }),
+          fetch(`${API_BASE}/api/alerts/labeled/evaluation?${baseParams.toString()}`, { headers }),
+        ]);
+
+        const readinessBody = await readinessRes.json();
+        const evaluationBody = await evaluationRes.json();
+
+        if (!readinessRes.ok) {
+          if (!suppressErrors) {
+            setReviewInsightsMessage(readinessBody.detail || "Reviewed dataset readiness failed to load.");
+          }
+          return;
+        }
+        if (!evaluationRes.ok) {
+          if (!suppressErrors) {
+            setReviewInsightsMessage(evaluationBody.detail || "Reviewed dataset evaluation failed to load.");
+          }
+          return;
+        }
+
+        setReviewReadiness(readinessBody);
+        setReviewEvaluation(evaluationBody);
+        if (!silentSuccess) {
+          setReviewInsightsMessage("Reviewed dataset health refreshed.");
+        }
+      } catch {
+        if (!suppressErrors) {
+          setReviewInsightsMessage("Cannot reach backend for reviewed dataset health.");
+        }
+      } finally {
+        setReviewInsightsBusy(false);
+      }
+    },
+    [authToken, sinceMinutes, stationId]
+  );
+
   useEffect(() => {
     loadSnapshot(stationId, sinceMinutes);
   }, [loadSnapshot, sinceMinutes, stationId]);
@@ -165,6 +229,16 @@ function App() {
   useEffect(() => {
     loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
   }, [communityImpactProfile, communitySinceMinutes, loadCommunityOverview]);
+
+  useEffect(() => {
+    if (!authToken) {
+      setReviewReadiness(null);
+      setReviewEvaluation(null);
+      setReviewInsightsMessage("Login admin to inspect reviewed dataset quality.");
+      return;
+    }
+    loadReviewInsights(stationId, sinceMinutes, { suppressErrors: true, silentSuccess: true });
+  }, [authToken, loadReviewInsights, sinceMinutes, stationId]);
 
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
@@ -215,6 +289,9 @@ function App() {
       if (data.event === "alert_review") {
         upsertAlert(data.payload);
         loadCommunityOverview(communitySinceMinutes, communityImpactProfile);
+        if (authToken) {
+          loadReviewInsights(stationId, sinceMinutes, { suppressErrors: true, silentSuccess: true });
+        }
       }
 
       if (data.event === "device_status") {
@@ -251,6 +328,8 @@ function App() {
     loadSnapshot,
     sinceMinutes,
     stationId,
+    authToken,
+    loadReviewInsights,
     upsertAlert,
     upsertDeviceStatus,
   ]);
@@ -308,6 +387,7 @@ function App() {
       }
       setAuthToken(data.access_token);
       setAuthMessage("Admin token ready");
+      setReviewInsightsMessage("");
     } catch {
       setAuthMessage("Cannot reach backend");
     }
@@ -468,6 +548,7 @@ function App() {
       if (alertHistoryById[alertId] || expandedHistoryAlertId === alertId) {
         await loadAlertHistory(alertId, { force: true, suppressErrors: true });
       }
+      await loadReviewInsights(stationId, sinceMinutes, { suppressErrors: true, silentSuccess: true });
       setAlertActionNotes((previous) => ({ ...previous, [alertId]: "" }));
       setIncidentMessage(
         `Incident ${actionCopy[action] || "updated"} for ${body.station_id}${note ? ". Note saved." : "."}`
@@ -508,6 +589,7 @@ function App() {
       if (alertHistoryById[alertId] || expandedHistoryAlertId === alertId) {
         await loadAlertHistory(alertId, { force: true, suppressErrors: true });
       }
+      await loadReviewInsights(stationId, sinceMinutes, { suppressErrors: true, silentSuccess: true });
       setAlertActionNotes((previous) => ({ ...previous, [alertId]: "" }));
       setIncidentMessage(
         label === "false_positive"
@@ -732,6 +814,11 @@ function App() {
             setAlertActionNotes((previous) => ({ ...previous, [alertId]: note }));
           }}
           onExportReviewedAlerts={runReviewedAlertExport}
+          reviewReadiness={reviewReadiness}
+          reviewEvaluation={reviewEvaluation}
+          reviewInsightsBusy={reviewInsightsBusy}
+          reviewInsightsMessage={reviewInsightsMessage}
+          onRefreshReviewInsights={() => loadReviewInsights(stationId, sinceMinutes, { silentSuccess: false })}
           alertHistoryById={alertHistoryById}
           expandedHistoryAlertId={expandedHistoryAlertId}
           historyBusyId={historyBusyId}
