@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, "codex/**"]
+    branches: [main, "vn-water-anomaly", "codex/**"]
   pull_request:
-    branches: [main]
+    branches: [main, "vn-water-anomaly"]
 
 jobs:
   backend:

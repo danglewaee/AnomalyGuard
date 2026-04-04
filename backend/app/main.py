@@ -154,6 +154,17 @@ async def stop_stream(user: dict = Depends(require_admin)) -> dict:
     return {"stream_running": False, "requested_by": user.get("sub")}
 
 
+def build_ws_bootstrap_payload(db: Session) -> dict:
+    store = PostgresStore(db)
+    return {
+        "meta": meta(db),
+        "stations": stations(),
+        "readings": [reading.model_dump(mode="json") for reading in store.latest_readings(limit=120, station_id=None, since_minutes=120)],
+        "alerts": [alert.model_dump(mode="json") for alert in store.latest_alerts(limit=40, station_id=None, since_minutes=240)],
+        "device_statuses": store.latest_device_states(),
+    }
+
+
 @app.websocket("/ws/stream")
 async def ws_stream(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -161,23 +172,13 @@ async def ws_stream(websocket: WebSocket) -> None:
 
     try:
         with SessionLocal() as db:
-            store = PostgresStore(db)
-            bootstrap_meta = meta(db)
-            bootstrap_readings = latest_readings(limit=120, station_id=None, since_minutes=120, db=db)
-            bootstrap_alerts = latest_alerts(limit=40, station_id=None, since_minutes=240, db=db)
-            bootstrap_device_statuses = store.latest_device_states()
+            bootstrap_payload = build_ws_bootstrap_payload(db)
 
         await websocket.send_text(
             json.dumps(
                 {
                     "event": "bootstrap",
-                    "payload": {
-                        "meta": bootstrap_meta,
-                        "stations": stations(),
-                        "readings": bootstrap_readings,
-                        "alerts": bootstrap_alerts,
-                        "device_statuses": bootstrap_device_statuses,
-                    },
+                    "payload": bootstrap_payload,
                 },
                 default=str,
             )

@@ -192,6 +192,45 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         register_station.assert_called_once()
         self.assertEqual(register_station.call_args.args[0].station_id, "delta-01")
 
+    async def test_non_ingest_job_status_does_not_overwrite_runtime_metadata(self) -> None:
+        now = datetime.now(UTC)
+        main.state.last_data_source = "vn/open-meteo"
+        main.state.last_ingest_note = "Imported 48 readings"
+        completed_job = JobStatus(
+            id="job-training",
+            job_type="prepare_retraining_run",
+            status="succeeded",
+            requested_by="test-admin",
+            created_at=now - timedelta(minutes=2),
+            updated_at=now,
+            started_at=now - timedelta(minutes=1),
+            completed_at=now,
+            parameters={"station_id": "mekong-can-tho", "since_minutes": 10080},
+            result_payload={
+                "source": "reviewed-alert-training-run",
+                "ingest_note": "Prepared retraining bundle",
+                "manifest": {"manifest_id": "labeled-alerts-123"},
+            },
+        )
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def get_job(self, job_id: str) -> JobStatus | None:
+                return completed_job if job_id == completed_job.id else None
+
+        with patch.object(jobs_routes, "PostgresStore", FakeStore), patch.object(
+            jobs_routes,
+            "register_station",
+        ) as register_station:
+            response = await self.client.get(f"/api/jobs/{completed_job.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(main.state.last_data_source, "vn/open-meteo")
+        self.assertEqual(main.state.last_ingest_note, "Imported 48 readings")
+        register_station.assert_not_called()
+
     async def test_acknowledge_incident_returns_updated_alert_and_broadcasts(self) -> None:
         now = datetime.now(UTC)
         updated_alert = AnomalyAlert(
@@ -693,6 +732,61 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload[0]["event_type"], "detected")
         self.assertEqual(payload[1]["event_value"], "acknowledged")
         self.assertEqual(payload[2]["note"], "Confirmed at intake")
+
+    def test_ws_bootstrap_payload_uses_store_alerts_without_route_dependency(self) -> None:
+        now = datetime.now(UTC)
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def counts(self) -> dict[str, int]:
+                return {"readings": 1, "alerts": 1, "device_states": 0, "jobs": 0}
+
+            def latest_readings(self, limit: int, station_id: str | None = None, since_minutes: int | None = None) -> list[WaterReading]:
+                return [
+                    WaterReading(
+                        timestamp=now - timedelta(minutes=4),
+                        station_id="river-01",
+                        ph=7.1,
+                        tds=210.0,
+                        turbidity=3.8,
+                        temperature_c=28.4,
+                        do_mg_l=6.3,
+                        flow_l_min=7.0,
+                    )
+                ]
+
+            def latest_alerts(self, limit: int, station_id: str | None = None, since_minutes: int | None = None) -> list[AnomalyAlert]:
+                return [
+                    AnomalyAlert(
+                        id="alert-bootstrap",
+                        timestamp=now - timedelta(minutes=5),
+                        station_id="river-01",
+                        severity="medium",
+                        score=0.58,
+                        reasons=["turbidity outside safe range"],
+                        feature_contributions={"turbidity": 1.4},
+                        incident_status="open",
+                        incident_note="",
+                        incident_updated_at=now - timedelta(minutes=5),
+                    )
+                ]
+
+            def latest_device_states(self) -> list[dict]:
+                return []
+
+        with patch.object(main, "PostgresStore", FakeStore), patch.object(
+            main,
+            "stations",
+            return_value=[{"station_id": "river-01", "station_name": "River Intake"}],
+        ):
+            payload = main.build_ws_bootstrap_payload(object())
+
+        self.assertEqual(payload["meta"]["counts"]["alerts"], 1)
+        self.assertEqual(len(payload["alerts"]), 1)
+        self.assertEqual(payload["alerts"][0]["id"], "alert-bootstrap")
+        self.assertEqual(len(payload["readings"]), 1)
 
     async def test_reviewed_alert_readiness_detects_recent_drift(self) -> None:
         now = datetime.now(UTC)
