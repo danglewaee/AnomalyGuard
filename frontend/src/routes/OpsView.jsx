@@ -89,6 +89,10 @@ function OpsView({
   retrainingJobMessage,
   lastRetrainingBundle,
   onPrepareRetraining,
+  bundleExportBusy,
+  bundleExportMessage,
+  onDownloadBundleJson,
+  onDownloadBundleExport,
   alertHistoryById,
   expandedHistoryAlertId,
   historyBusyId,
@@ -443,6 +447,23 @@ function OpsView({
                   <span>Recommended Threshold</span>
                   <strong>{formatScore(lastRetrainingBundle.recommended_threshold)}</strong>
                   <div className="muted tiny">{lastRetrainingBundle.mlflow_run_id || "No MLflow run id available"}</div>
+                </div>
+              </div>
+            ) : null}
+
+            {lastRetrainingBundle ? (
+              <div className="bundleActions">
+                <button className="inlineButton ghost" onClick={onDownloadBundleJson} disabled={bundleExportBusy}>
+                  {bundleExportBusy ? "Working..." : "Download Bundle JSON"}
+                </button>
+                <button className="inlineButton ghost" onClick={() => onDownloadBundleExport("json")} disabled={bundleExportBusy}>
+                  {bundleExportBusy ? "Working..." : "Reviewed JSON"}
+                </button>
+                <button className="inlineButton subtle" onClick={() => onDownloadBundleExport("csv")} disabled={bundleExportBusy}>
+                  {bundleExportBusy ? "Working..." : "Reviewed CSV"}
+                </button>
+                <div className="muted tiny bundleExportMessage">
+                  {bundleExportMessage || "Export the exact reviewed dataset that was used to prepare this bundle."}
                 </div>
               </div>
             ) : null}

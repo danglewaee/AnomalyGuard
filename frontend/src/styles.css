@@ -600,7 +600,8 @@ h3 {
 }
 
 .healthActionRow,
-.bundleSummary {
+.bundleSummary,
+.bundleActions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
@@ -740,6 +741,15 @@ h3 {
   margin-top: 6px;
   font-size: 1.05rem;
   color: #16324d;
+}
+
+.bundleActions {
+  align-items: center;
+}
+
+.bundleExportMessage {
+  min-width: 240px;
+  flex: 1 1 240px;
 }
 
 .communityGrid {

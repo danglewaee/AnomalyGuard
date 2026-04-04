@@ -62,6 +62,8 @@ function App() {
   const [retrainingJobBusy, setRetrainingJobBusy] = useState(false);
   const [retrainingJobMessage, setRetrainingJobMessage] = useState("");
   const [lastRetrainingBundle, setLastRetrainingBundle] = useState(null);
+  const [bundleExportBusy, setBundleExportBusy] = useState(false);
+  const [bundleExportMessage, setBundleExportMessage] = useState("");
 
   const navigate = useCallback((nextRoute) => {
     const normalized = normalizeRoute(nextRoute);
@@ -481,6 +483,17 @@ function App() {
     setDeviceControl((previous) => ({ ...previous, ...patch }));
   }, []);
 
+  const triggerDownload = useCallback((blob, filename) => {
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.URL.revokeObjectURL(url);
+  }, []);
+
   const runDeviceControl = async () => {
     setDeviceMessage("");
     if (!authToken) {
@@ -711,6 +724,64 @@ function App() {
     }
   };
 
+  const downloadRetrainingBundleJson = useCallback(() => {
+    setBundleExportMessage("");
+    if (!lastRetrainingBundle) {
+      setBundleExportMessage("Prepare a retraining bundle first.");
+      return;
+    }
+
+    const manifestId = lastRetrainingBundle.manifest?.manifest_id || "anomalyguard-training-bundle";
+    const blob = new Blob([JSON.stringify(lastRetrainingBundle, null, 2)], { type: "application/json" });
+    triggerDownload(blob, `${manifestId}.json`);
+    setBundleExportMessage(`Downloaded ${manifestId}.json`);
+  }, [lastRetrainingBundle, triggerDownload]);
+
+  const downloadRetrainingBundleExport = useCallback(
+    async (format) => {
+      setBundleExportMessage("");
+      if (!authToken) {
+        setBundleExportMessage("Login admin first to export bundle artifacts.");
+        return;
+      }
+      if (!lastRetrainingBundle?.export_urls?.[format]) {
+        setBundleExportMessage(`No ${format.toUpperCase()} export is attached to the latest bundle yet.`);
+        return;
+      }
+
+      setBundleExportBusy(true);
+      try {
+        const res = await fetch(`${API_BASE}${lastRetrainingBundle.export_urls[format]}`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        if (!res.ok) {
+          let detail = `Bundle ${format.toUpperCase()} export failed`;
+          try {
+            const body = await res.json();
+            detail = body.detail || detail;
+          } catch {
+            // Keep default detail when response is not JSON.
+          }
+          setBundleExportMessage(detail);
+          return;
+        }
+
+        const blob = await res.blob();
+        const disposition = res.headers.get("content-disposition") || "";
+        const filenameMatch = disposition.match(/filename=\"?([^"]+)\"?/i);
+        const manifestId = lastRetrainingBundle.manifest?.manifest_id || "anomalyguard-training-bundle";
+        const fallbackName = format === "csv" ? `${manifestId}-reviewed-alerts.csv` : `${manifestId}-reviewed-alerts.json`;
+        triggerDownload(blob, filenameMatch?.[1] || fallbackName);
+        setBundleExportMessage(`Downloaded reviewed alerts ${format.toUpperCase()} export.`);
+      } catch {
+        setBundleExportMessage("Cannot reach backend for bundle export.");
+      } finally {
+        setBundleExportBusy(false);
+      }
+    },
+    [authToken, lastRetrainingBundle, triggerDownload]
+  );
+
   const runRetrainingPreparation = async () => {
     setRetrainingJobMessage("");
     if (!authToken) {
@@ -908,6 +979,10 @@ function App() {
           retrainingJobMessage={retrainingJobMessage}
           lastRetrainingBundle={lastRetrainingBundle}
           onPrepareRetraining={runRetrainingPreparation}
+          bundleExportBusy={bundleExportBusy}
+          bundleExportMessage={bundleExportMessage}
+          onDownloadBundleJson={downloadRetrainingBundleJson}
+          onDownloadBundleExport={downloadRetrainingBundleExport}
           alertHistoryById={alertHistoryById}
           expandedHistoryAlertId={expandedHistoryAlertId}
           historyBusyId={historyBusyId}
