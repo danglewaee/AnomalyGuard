@@ -34,6 +34,8 @@ AI-powered anomaly detection platform for water monitoring, upgraded to a produc
 docker compose up --build
 ```
 
+The backend and worker containers now run `alembic upgrade head` before starting, so a fresh local stack applies the current schema revision automatically after Postgres becomes healthy.
+
 Services:
 - API: `http://localhost:8000`
 - Frontend: `http://localhost:5173`
@@ -58,6 +60,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 copy .env.example .env
+alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -66,6 +69,15 @@ Run backend tests:
 ```powershell
 python -m unittest discover -s tests -p "test_*.py"
 ```
+
+Database schema management:
+
+```powershell
+alembic upgrade head
+alembic current
+```
+
+Schema changes now go through Alembic revisions under `backend/alembic/versions`. The API no longer calls `Base.metadata.create_all(...)` on startup.
 
 ## Authentication
 
@@ -197,6 +209,12 @@ FAANG-grade platform planning docs:
 - Alert/readings counters and ingest request latency are exported
 - Job lifecycle metrics now include status transitions, queue time, and run time by job type
 - Ingest observability now tracks completed batches and duplicate readings skipped per source
+
+## Schema Governance
+
+- Alembic is the source of truth for schema changes
+- Startup now fails fast if the database has not been migrated to an Alembic revision
+- The initial migration attempts TimescaleDB enablement for `readings`, but falls back cleanly on plain PostgreSQL
 
 ## Notes
 

@@ -7,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.routes.alerts import router as alerts_router
@@ -17,12 +16,13 @@ from app.api.routes.ingest import router as ingest_router
 from app.api.routes.incidents import router as incidents_router
 from app.api.routes.jobs import router as jobs_router
 from app.config import settings
-from app.db import Base, SessionLocal, engine, get_db
+from app.db import SessionLocal, engine, get_db
 from app.dependencies import require_admin
 from app.runtime import broadcast, state
 from app.schemas import WaterReading
 from app.services.auth import create_access_token, verify_password
 from app.services.alert_pipeline import ensure_valid_station, insert_reading_and_alert
+from app.services.schema_management import assert_schema_ready, get_schema_revision
 from app.services.stations import default_station_id, list_stations
 from app.services.store_pg import PostgresStore
 
@@ -43,16 +43,6 @@ app.include_router(device_router)
 app.include_router(ingest_router)
 
 
-def init_db() -> None:
-    Base.metadata.create_all(bind=engine)
-    with engine.begin() as conn:
-        try:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
-            conn.execute(text("SELECT create_hypertable('readings', 'timestamp', if_not_exists => TRUE)"))
-        except Exception:
-            pass
-
-
 async def stream_loop() -> None:
     while True:
         if settings.enable_simulator:
@@ -70,7 +60,7 @@ async def stream_loop() -> None:
 
 @app.on_event("startup")
 async def startup() -> None:
-    init_db()
+    assert_schema_ready(engine)
     if state.stream_task is None or state.stream_task.done():
         state.stream_task = asyncio.create_task(stream_loop())
 
@@ -101,10 +91,13 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()) -> dict:
 
 @app.get("/health")
 def health() -> dict:
+    with SessionLocal() as db:
+        schema_revision = get_schema_revision(db)
     return {
         "status": "ok",
         "stream_running": state.stream_task is not None and not state.stream_task.done(),
         "data_source": state.last_data_source,
+        "schema_revision": schema_revision,
         "stack": ["fastapi", "postgres", "timescaledb", "celery", "redis", "kafka", "mlflow", "prometheus"],
     }
 
@@ -115,6 +108,7 @@ def meta(db: Session = Depends(get_db)) -> dict:
     return {
         "data_source": state.last_data_source,
         "last_ingest_note": state.last_ingest_note,
+        "schema_revision": get_schema_revision(db),
         "timezone": "UTC timestamps from backend; station timezone provided per station",
         "default_station_id": default_station_id(),
         "counts": store.counts(),
