@@ -1,8 +1,8 @@
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
-from app.config import settings
 from app.services.auth import decode_access_token
+from app.services.device_auth import validate_device_key
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
@@ -23,6 +23,5 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
-def require_device_key(x_device_key: str | None = Header(default=None)) -> None:
-    if x_device_key != settings.device_api_key:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device key")
+def require_device_key(station_id: str, x_device_key: str | None = Header(default=None)) -> None:
+    validate_device_key(station_id, x_device_key)

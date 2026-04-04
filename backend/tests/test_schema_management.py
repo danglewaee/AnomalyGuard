@@ -1,8 +1,17 @@
 from pathlib import Path
+import os
 import sys
 import unittest
 
 from sqlalchemy.exc import ProgrammingError
+
+os.environ.setdefault("APP_ENV", "test")
+os.environ.setdefault("ALLOW_INSECURE_DEFAULTS", "false")
+os.environ.setdefault("JWT_SECRET_KEY", "anomalyguard-test-jwt-0123456789abcdef0123456789")
+os.environ.setdefault("ADMIN_USERNAME", "test-admin")
+os.environ.setdefault("ADMIN_PASSWORD", "AnomalyGuardTestAdmin!2026")
+os.environ.setdefault("DEVICE_API_KEY", "anomalyguard-test-device-key-0123456789")
+os.environ.setdefault("CORS_ALLOW_ORIGINS", "http://testserver")
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]

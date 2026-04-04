@@ -41,6 +41,7 @@ Services:
 - Frontend: `http://localhost:5173`
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000` (`admin/admin`)
+- Kafka (host tools): `localhost:9094`
 
 Frontend routes:
 
@@ -86,7 +87,7 @@ Request admin token:
 ```powershell
 curl -X POST "http://localhost:8000/api/auth/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=admin&password=admin123"
+  -d "username=ops-admin&password=AnomalyGuardLocalAdmin!2026"
 ```
 
 Use returned bearer token for protected endpoints (`/api/ingest/*`, `/api/stream/start`, `/api/stream/stop`).
@@ -142,7 +143,7 @@ ESP32-compatible telemetry ingest:
 ```powershell
 curl -X POST "http://localhost:8000/api/device/telemetry" \
   -H "Content-Type: application/json" \
-  -H "X-Device-Key: anomalyguard-device-key" \
+  -H "X-Device-Key: anomalyguard-device-esp32-001-32char-local" \
   -d "{\"station_id\":\"esp32-device-001\",\"station_name\":\"Home Device\",\"ph\":7.2,\"tds\":420,\"waterTemp\":28.4,\"temp\":31.1,\"hum\":68.5,\"weight\":350.0,\"isFeeding\":false}"
 ```
 
@@ -159,7 +160,7 @@ Device polling endpoint for latest control payload:
 
 ```powershell
 curl "http://localhost:8000/api/device/control/esp32-device-001" \
-  -H "X-Device-Key: anomalyguard-device-key"
+  -H "X-Device-Key: anomalyguard-device-esp32-001-32char-local"
 ```
 
 Bring-up helpers:
@@ -178,6 +179,14 @@ Optional backend env:
 - `COMMUNITY_IMPACT_PROFILE_PATH`
   - points to a JSON profile that defines downstream audience groups, priority sites, and corridor wording for community updates
   - default profile lives at `deployment/community-impact/default.json`
+- `APP_ENV`
+  - `development`, `test`, `staging`, or `production`
+- `ALLOW_INSECURE_DEFAULTS`
+  - leave this `false` outside short-lived demos; strict mode requires explicit JWT/admin/device/CORS configuration
+- `CORS_ALLOW_ORIGINS`
+  - comma-separated allowlist for browser clients; wildcard origins are rejected in strict mode
+- `DEVICE_KEYS_PATH`
+  - path to a JSON object keyed by `station_id` for per-device credentials; `backend/device-keys.example.json` shows the expected shape
 
 Demo helpers:
 
@@ -215,6 +224,20 @@ FAANG-grade platform planning docs:
 - Alembic is the source of truth for schema changes
 - Startup now fails fast if the database has not been migrated to an Alembic revision
 - The initial migration attempts TimescaleDB enablement for `readings`, but falls back cleanly on plain PostgreSQL
+
+## Security Defaults
+
+- The backend now runs in strict security mode by default
+- Weak built-in JWT/admin/device defaults are rejected unless `ALLOW_INSECURE_DEFAULTS=true`
+- CORS is now allowlist-driven instead of wildcard
+- Device authentication supports a per-device key registry through `DEVICE_KEYS_PATH`
+
+## Local Kafka
+
+- `docker-compose.yml` now starts a real Kafka broker in KRaft mode
+- Containers use the internal listener `kafka:9092`
+- Host-side tools can connect to Kafka at `localhost:9094`
+- Docker Compose enables Kafka publishing for the backend and worker so local alert streaming matches the documented stack
 
 ## Notes
 

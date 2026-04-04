@@ -22,7 +22,7 @@ jobs:
         run: python -m unittest discover -s backend/tests -p "test_*.py"
       - name: Check Alembic revision graph
         working-directory: backend
-        run: python -m alembic -c alembic.ini heads
+        run: alembic -c alembic.ini heads
       - name: Compile backend
         run: python -m compileall backend/app backend/alembic
 

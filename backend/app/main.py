@@ -30,8 +30,9 @@ app = FastAPI(title=settings.app_name, version=settings.app_version)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.cors_allowed_origins,
+    allow_origin_regex=settings.cors_allow_origin_regex or None,
+    allow_credentials=bool(settings.cors_allowed_origins or settings.cors_allow_origin_regex),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -95,6 +96,7 @@ def health() -> dict:
         schema_revision = get_schema_revision(db)
     return {
         "status": "ok",
+        "environment": settings.app_env,
         "stream_running": state.stream_task is not None and not state.stream_task.done(),
         "data_source": state.last_data_source,
         "schema_revision": schema_revision,

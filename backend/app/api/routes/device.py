@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -6,6 +6,7 @@ from app.dependencies import require_admin, require_device_key
 from app.runtime import broadcast, state
 from app.schemas import DeviceControlState, DeviceTelemetry, StationProfile
 from app.services.alert_pipeline import insert_reading_and_alert
+from app.services.device_auth import validate_device_key
 from app.services.device_support import build_device_station_profile, build_device_telemetry_snapshot, telemetry_to_reading
 from app.services.stations import get_station, has_station, list_stations, register_station
 from app.services.store_pg import PostgresStore
@@ -55,9 +56,10 @@ async def set_device_control(
 async def ingest_device_telemetry(
     payload: DeviceTelemetry,
     db: Session = Depends(get_db),
-    _: None = Depends(require_device_key),
+    x_device_key: str | None = Header(default=None),
 ) -> dict:
     profile = build_device_station_profile(payload)
+    validate_device_key(profile.station_id, x_device_key)
     known_station = has_station(profile.station_id)
     register_station(profile)
     payload.station_id = profile.station_id
