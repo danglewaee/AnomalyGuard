@@ -34,6 +34,29 @@ jobs:
       - name: Compile backend
         run: python -m compileall backend/app backend/alembic
 
+  integration:
+    runs-on: ubuntu-latest
+    needs: backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap local secrets
+        shell: pwsh
+        run: .\scripts\bootstrap-local-secrets.ps1
+      - name: Start integration stack
+        run: docker compose up -d db redis kafka backend
+      - name: Run platform integration smoke
+        shell: pwsh
+        run: .\scripts\platform-integration-smoke.ps1
+      - name: Dump integration stack state
+        if: failure()
+        run: docker compose ps
+      - name: Dump integration service logs
+        if: failure()
+        run: docker compose logs --no-color db redis kafka backend
+      - name: Tear down integration stack
+        if: always()
+        run: docker compose down -v
+
   frontend:
     runs-on: ubuntu-latest
     steps:

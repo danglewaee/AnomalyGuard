@@ -13,7 +13,7 @@ AI-powered anomaly detection platform for water monitoring, upgraded to a produc
 - Monitoring: Prometheus + Grafana
 - Auth: JWT (OAuth2 password flow) + admin RBAC
 - Infra: Docker Compose + Terraform scaffold
-- CI: GitHub Actions (backend compile + frontend build)
+- CI: GitHub Actions (backend tests, integration smoke, frontend build)
 
 ## Project Structure
 
@@ -72,6 +72,14 @@ Run backend tests:
 ```powershell
 python -m unittest discover -s tests -p "test_*.py"
 ```
+
+Run the platform integration smoke test against the local Docker stack:
+
+```powershell
+.\scripts\platform-integration-smoke.ps1 -ManageStack
+```
+
+If Docker Desktop is not running, the smoke script now fails fast with a clear preflight error instead of waiting for the API health timeout.
 
 Database schema management:
 
