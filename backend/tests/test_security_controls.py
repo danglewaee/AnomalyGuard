@@ -61,11 +61,29 @@ class SecurityControlTests(unittest.TestCase):
             jwt_secret_key="anomalyguard-config-jwt-0123456789abcdef0123456789",
             admin_password="AnomalyGuardConfigAdmin!2026",
             device_api_key="",
-            device_keys_path="device-keys.example.json",
+            device_keys_path="secrets.example/device_keys.json.example",
             cors_allow_origins="http://localhost:5173",
         )
 
-        self.assertTrue(settings.device_keys_path.endswith("backend\\device-keys.example.json"))
+        self.assertTrue(settings.device_keys_path.endswith("backend\\secrets.example\\device_keys.json.example"))
+
+    def test_settings_resolves_jwt_secret_from_file(self) -> None:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as handle:
+            handle.write("anomalyguard-file-jwt-0123456789abcdef0123456789")
+            jwt_secret_path = handle.name
+
+        try:
+            settings = Settings(
+                jwt_secret_key="",
+                jwt_secret_key_file=jwt_secret_path,
+                admin_password="AnomalyGuardConfigAdmin!2026",
+                device_api_key="anomalyguard-config-device-key-0123456789",
+                cors_allow_origins="http://localhost:5173",
+            )
+        finally:
+            Path(jwt_secret_path).unlink(missing_ok=True)
+
+        self.assertEqual(settings.jwt_secret_key, "anomalyguard-file-jwt-0123456789abcdef0123456789")
 
     def test_validate_device_key_uses_station_registry_when_configured(self) -> None:
         with patch.object(device_auth, "load_device_key_registry", return_value={"esp32-device-001": "device-key-001"}):

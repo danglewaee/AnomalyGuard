@@ -3,8 +3,23 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import AlertRecord, DeviceStateRecord, IncidentEventRecord, IncidentRecord, JobRecord, ReadingRecord
-from app.schemas import AlertHistoryEntry, AnomalyAlert, JobStatus, StationProfile, WaterReading
+from app.models import (
+    AlertRecord,
+    DeviceCredentialEventRecord,
+    DeviceStateRecord,
+    IncidentEventRecord,
+    IncidentRecord,
+    JobRecord,
+    ReadingRecord,
+)
+from app.schemas import (
+    AlertHistoryEntry,
+    AnomalyAlert,
+    DeviceCredentialAuditEntry,
+    JobStatus,
+    StationProfile,
+    WaterReading,
+)
 from app.services.device_support import normalize_device_control
 from app.services.metrics import observe_job_queue_seconds, observe_job_run_seconds, record_job_status_transition
 
@@ -370,12 +385,57 @@ class PostgresStore:
         self.db.refresh(row)
         return self._device_state_to_dict(row)
 
+    def record_device_credential_event(
+        self,
+        *,
+        station_id: str,
+        event_type: str,
+        actor: str,
+        key_fingerprint: str,
+        note: str,
+        metadata_payload: dict | None = None,
+    ) -> DeviceCredentialAuditEntry:
+        row = DeviceCredentialEventRecord(
+            station_id=station_id,
+            event_type=event_type,
+            actor=actor,
+            key_fingerprint=key_fingerprint,
+            note=note,
+            metadata_payload=metadata_payload or {},
+            created_at=datetime.now(timezone.utc),
+        )
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return self._device_credential_event_to_schema(row)
+
+    def device_credential_events(
+        self,
+        *,
+        limit: int = 100,
+        station_id: str | None = None,
+    ) -> list[DeviceCredentialAuditEntry]:
+        stmt = select(DeviceCredentialEventRecord)
+        if station_id:
+            stmt = stmt.where(DeviceCredentialEventRecord.station_id == station_id)
+        rows = self.db.scalars(
+            stmt.order_by(DeviceCredentialEventRecord.created_at.desc(), DeviceCredentialEventRecord.id.desc()).limit(limit)
+        ).all()
+        return [self._device_credential_event_to_schema(row) for row in rows]
+
     def counts(self) -> dict[str, int]:
         readings = self.db.scalar(select(func.count()).select_from(ReadingRecord)) or 0
         alerts = self.db.scalar(select(func.count()).select_from(AlertRecord)) or 0
         devices = self.db.scalar(select(func.count()).select_from(DeviceStateRecord)) or 0
+        credential_events = self.db.scalar(select(func.count()).select_from(DeviceCredentialEventRecord)) or 0
         jobs = self.db.scalar(select(func.count()).select_from(JobRecord)) or 0
-        return {"readings": int(readings), "alerts": int(alerts), "device_states": int(devices), "jobs": int(jobs)}
+        return {
+            "readings": int(readings),
+            "alerts": int(alerts),
+            "device_states": int(devices),
+            "device_credential_events": int(credential_events),
+            "jobs": int(jobs),
+        }
 
     def _device_state_to_dict(self, row: DeviceStateRecord) -> dict:
         return {
@@ -454,5 +514,17 @@ class PostgresStore:
             event_value=row.event_value,
             note=row.note or "",
             changed_by=row.changed_by or "",
+            created_at=row.created_at,
+        )
+
+    def _device_credential_event_to_schema(self, row: DeviceCredentialEventRecord) -> DeviceCredentialAuditEntry:
+        return DeviceCredentialAuditEntry(
+            id=row.id,
+            station_id=row.station_id,
+            event_type=row.event_type,
+            actor=row.actor or "",
+            key_fingerprint=row.key_fingerprint or "",
+            note=row.note or "",
+            metadata_payload=row.metadata_payload or {},
             created_at=row.created_at,
         )

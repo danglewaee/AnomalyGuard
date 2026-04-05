@@ -91,3 +91,16 @@ class DeviceStateRecord(Base):
     telemetry_payload: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     control_state: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     reading_preview: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+
+
+class DeviceCredentialEventRecord(Base):
+    __tablename__ = "device_credential_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    station_id: Mapped[str] = mapped_column(String(128), index=True)
+    event_type: Mapped[str] = mapped_column(String(32), index=True)
+    actor: Mapped[str] = mapped_column(String(128), default="")
+    key_fingerprint: Mapped[str] = mapped_column(String(64), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    metadata_payload: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

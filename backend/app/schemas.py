@@ -207,6 +207,40 @@ class DeviceStatus(BaseModel):
     reading_preview: Dict[str, Any] = Field(default_factory=dict)
 
 
+class DeviceCredentialMutationRequest(BaseModel):
+    note: str = ""
+
+
+class DeviceCredentialSummary(BaseModel):
+    station_id: str
+    key_fingerprint: str
+    last_event_type: str = ""
+    last_rotated_at: datetime | None = None
+    last_rotated_by: str = ""
+    registry_managed: bool = True
+
+
+class DeviceCredentialAuditEntry(BaseModel):
+    id: int
+    station_id: str
+    event_type: Literal["provisioned", "rotated", "revoked"]
+    actor: str = ""
+    key_fingerprint: str = ""
+    note: str = ""
+    metadata_payload: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class DeviceCredentialRotateResponse(BaseModel):
+    station_id: str
+    issued_key: str
+    key_fingerprint: str
+    event_type: Literal["provisioned", "rotated"]
+    rotated_at: datetime
+    rotated_by: str
+    note: str = ""
+
+
 class CommunityOverviewSummary(BaseModel):
     stable: int = 0
     watch: int = 0

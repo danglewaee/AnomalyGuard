@@ -53,17 +53,22 @@ services:
       APP_ENV: development
       ALLOW_INSECURE_DEFAULTS: "false"
       DATABASE_URL: postgresql+psycopg://anomaly:anomaly@db:5432/anomalyguard
-      JWT_SECRET_KEY: anomalyguard-compose-jwt-e8c3190ab8c04730b4e4379237f6fd6d
+      JWT_SECRET_KEY: ""
+      JWT_SECRET_KEY_FILE: /run/anomalyguard-secrets/jwt_secret_key.txt
       ADMIN_USERNAME: ops-admin
-      ADMIN_PASSWORD: AnomalyGuardComposeAdmin!2026
+      ADMIN_PASSWORD: ""
+      ADMIN_PASSWORD_FILE: /run/anomalyguard-secrets/admin_password.txt
       DEVICE_API_KEY: ""
-      DEVICE_KEYS_PATH: /app/device-keys.example.json
+      DEVICE_API_KEY_FILE: ""
+      DEVICE_KEYS_PATH: /run/anomalyguard-secrets/device_keys.json
       CORS_ALLOW_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       REDIS_URL: redis://redis:6379/0
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       ENABLE_KAFKA_PUBLISH: "true"
     ports:
       - "8000:8000"
+    volumes:
+      - ./backend/.secrets:/run/anomalyguard-secrets:ro
     depends_on:
       db:
         condition: service_healthy
@@ -82,15 +87,20 @@ services:
       APP_ENV: development
       ALLOW_INSECURE_DEFAULTS: "false"
       DATABASE_URL: postgresql+psycopg://anomaly:anomaly@db:5432/anomalyguard
-      JWT_SECRET_KEY: anomalyguard-compose-jwt-e8c3190ab8c04730b4e4379237f6fd6d
+      JWT_SECRET_KEY: ""
+      JWT_SECRET_KEY_FILE: /run/anomalyguard-secrets/jwt_secret_key.txt
       ADMIN_USERNAME: ops-admin
-      ADMIN_PASSWORD: AnomalyGuardComposeAdmin!2026
+      ADMIN_PASSWORD: ""
+      ADMIN_PASSWORD_FILE: /run/anomalyguard-secrets/admin_password.txt
       DEVICE_API_KEY: ""
-      DEVICE_KEYS_PATH: /app/device-keys.example.json
+      DEVICE_API_KEY_FILE: ""
+      DEVICE_KEYS_PATH: /run/anomalyguard-secrets/device_keys.json
       CORS_ALLOW_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       REDIS_URL: redis://redis:6379/0
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       ENABLE_KAFKA_PUBLISH: "true"
+    volumes:
+      - ./backend/.secrets:/run/anomalyguard-secrets:ro
     depends_on:
       db:
         condition: service_healthy

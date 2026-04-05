@@ -1,0 +1,4 @@
+{
+  "esp32-device-001": "<replace-with-strong-random-key>",
+  "esp32-device-002": "<replace-with-strong-random-key>"
+}

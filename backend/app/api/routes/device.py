@@ -4,9 +4,18 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.dependencies import require_admin, require_device_key
 from app.runtime import broadcast, state
-from app.schemas import DeviceControlState, DeviceTelemetry, StationProfile
+from app.schemas import (
+    DeviceControlState,
+    DeviceCredentialAuditEntry,
+    DeviceCredentialMutationRequest,
+    DeviceCredentialRotateResponse,
+    DeviceCredentialSummary,
+    DeviceTelemetry,
+    StationProfile,
+)
 from app.services.alert_pipeline import insert_reading_and_alert
 from app.services.device_auth import validate_device_key
+from app.services.device_credentials import audit_device_credentials, list_device_credentials, revoke_device_key, rotate_device_key
 from app.services.device_support import build_device_station_profile, build_device_telemetry_snapshot, telemetry_to_reading
 from app.services.stations import get_station, has_station, list_stations, register_station
 from app.services.store_pg import PostgresStore
@@ -18,6 +27,76 @@ router = APIRouter()
 @router.get("/api/device/status")
 def device_statuses(station_id: str | None = Query(default=None), db: Session = Depends(get_db)) -> list[dict]:
     return PostgresStore(db).latest_device_states(station_id=station_id)
+
+
+@router.get("/api/device/credentials")
+def get_device_credentials(
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> list[DeviceCredentialSummary]:
+    return list_device_credentials(db)
+
+
+@router.get("/api/device/credentials/audit")
+def get_device_credential_audit(
+    station_id: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> list[DeviceCredentialAuditEntry]:
+    return audit_device_credentials(db, station_id=station_id, limit=limit)
+
+
+@router.post("/api/device/credentials/{station_id}/rotate")
+async def rotate_device_credential(
+    station_id: str,
+    payload: DeviceCredentialMutationRequest,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_admin),
+) -> DeviceCredentialRotateResponse:
+    response = rotate_device_key(
+        db,
+        station_id=station_id,
+        rotated_by=user.get("sub", ""),
+        note=payload.note,
+    )
+    await broadcast(
+        "device_credential_event",
+        {
+            "station_id": response.station_id,
+            "event_type": response.event_type,
+            "key_fingerprint": response.key_fingerprint,
+            "rotated_at": response.rotated_at,
+            "rotated_by": response.rotated_by,
+        },
+    )
+    return response
+
+
+@router.post("/api/device/credentials/{station_id}/revoke")
+async def revoke_device_credential(
+    station_id: str,
+    payload: DeviceCredentialMutationRequest,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_admin),
+) -> DeviceCredentialAuditEntry:
+    response = revoke_device_key(
+        db,
+        station_id=station_id,
+        revoked_by=user.get("sub", ""),
+        note=payload.note,
+    )
+    await broadcast(
+        "device_credential_event",
+        {
+            "station_id": response.station_id,
+            "event_type": response.event_type,
+            "key_fingerprint": response.key_fingerprint,
+            "created_at": response.created_at,
+            "actor": response.actor,
+        },
+    )
+    return response
 
 
 @router.get("/api/device/control/{station_id}")

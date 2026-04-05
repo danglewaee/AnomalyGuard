@@ -9,6 +9,14 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: test
+      ALLOW_INSECURE_DEFAULTS: "false"
+      JWT_SECRET_KEY: anomalyguard-ci-jwt-0123456789abcdef0123456789
+      ADMIN_USERNAME: test-admin
+      ADMIN_PASSWORD: AnomalyGuardCiAdmin!2026
+      DEVICE_API_KEY: anomalyguard-ci-device-key-0123456789
+      CORS_ALLOW_ORIGINS: http://testserver
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,7 +30,7 @@ jobs:
         run: python -m unittest discover -s backend/tests -p "test_*.py"
       - name: Check Alembic revision graph
         working-directory: backend
-        run: alembic -c alembic.ini heads
+        run: python -m alembic -c alembic.ini heads
       - name: Compile backend
         run: python -m compileall backend/app backend/alembic
 

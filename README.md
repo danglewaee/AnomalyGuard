@@ -31,10 +31,11 @@ AI-powered anomaly detection platform for water monitoring, upgraded to a produc
 ## Run Full Stack (Docker)
 
 ```powershell
+.\scripts\bootstrap-local-secrets.ps1
 docker compose up --build
 ```
 
-The backend and worker containers now run `alembic upgrade head` before starting, so a fresh local stack applies the current schema revision automatically after Postgres becomes healthy.
+The backend and worker containers now run `alembic upgrade head` before starting, so a fresh local stack applies the current schema revision automatically after Postgres becomes healthy. The bootstrap script creates ignored secret files under `backend/.secrets/`, and Compose mounts them read-only into the containers.
 
 Services:
 - API: `http://localhost:8000`
@@ -56,6 +57,7 @@ Current UI split:
 ## Local Backend (without Docker)
 
 ```powershell
+.\scripts\bootstrap-local-secrets.ps1
 cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -85,9 +87,10 @@ Schema changes now go through Alembic revisions under `backend/alembic/versions`
 Request admin token:
 
 ```powershell
+$adminPassword = Get-Content .\backend\.secrets\admin_password.txt -Raw
 curl -X POST "http://localhost:8000/api/auth/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=ops-admin&password=AnomalyGuardLocalAdmin!2026"
+  -d "username=ops-admin&password=$adminPassword"
 ```
 
 Use returned bearer token for protected endpoints (`/api/ingest/*`, `/api/stream/start`, `/api/stream/stop`).
@@ -141,9 +144,10 @@ curl -X POST "http://localhost:8000/api/ingest/usgs?site_no=01646500&hours=24" \
 ESP32-compatible telemetry ingest:
 
 ```powershell
+$deviceKeys = Get-Content .\backend\.secrets\device_keys.json -Raw | ConvertFrom-Json
 curl -X POST "http://localhost:8000/api/device/telemetry" \
   -H "Content-Type: application/json" \
-  -H "X-Device-Key: anomalyguard-device-esp32-001-32char-local" \
+  -H "X-Device-Key: $($deviceKeys.'esp32-device-001')" \
   -d "{\"station_id\":\"esp32-device-001\",\"station_name\":\"Home Device\",\"ph\":7.2,\"tds\":420,\"waterTemp\":28.4,\"temp\":31.1,\"hum\":68.5,\"weight\":350.0,\"isFeeding\":false}"
 ```
 
@@ -160,8 +164,19 @@ Device polling endpoint for latest control payload:
 
 ```powershell
 curl "http://localhost:8000/api/device/control/esp32-device-001" \
-  -H "X-Device-Key: anomalyguard-device-esp32-001-32char-local"
+  -H "X-Device-Key: $($deviceKeys.'esp32-device-001')"
 ```
+
+Device credential lifecycle endpoints:
+
+- `GET /api/device/credentials`
+  - admin-only inventory with station fingerprint and last rotation metadata
+- `GET /api/device/credentials/audit`
+  - admin-only audit feed for provision, rotation, and revoke events
+- `POST /api/device/credentials/{station_id}/rotate`
+  - admin-only rotation/provision endpoint; returns the new key exactly once
+- `POST /api/device/credentials/{station_id}/revoke`
+  - admin-only revocation endpoint that removes the station from the registry
 
 Bring-up helpers:
 
@@ -183,10 +198,16 @@ Optional backend env:
   - `development`, `test`, `staging`, or `production`
 - `ALLOW_INSECURE_DEFAULTS`
   - leave this `false` outside short-lived demos; strict mode requires explicit JWT/admin/device/CORS configuration
+- `JWT_SECRET_KEY_FILE`
+  - file-based secret path for the JWT signing key
+- `ADMIN_PASSWORD_FILE`
+  - file-based secret path for the admin password
+- `DEVICE_API_KEY_FILE`
+  - file-based secret path for the shared fallback device key when no per-device registry is configured
 - `CORS_ALLOW_ORIGINS`
   - comma-separated allowlist for browser clients; wildcard origins are rejected in strict mode
 - `DEVICE_KEYS_PATH`
-  - path to a JSON object keyed by `station_id` for per-device credentials; `backend/device-keys.example.json` shows the expected shape
+  - path to a JSON object keyed by `station_id` for per-device credentials; `backend/secrets.example/device_keys.json.example` shows the expected shape
 
 Demo helpers:
 
@@ -230,7 +251,9 @@ FAANG-grade platform planning docs:
 - The backend now runs in strict security mode by default
 - Weak built-in JWT/admin/device defaults are rejected unless `ALLOW_INSECURE_DEFAULTS=true`
 - CORS is now allowlist-driven instead of wildcard
+- The repo no longer carries live secrets in tracked env files or Docker build inputs
 - Device authentication supports a per-device key registry through `DEVICE_KEYS_PATH`
+- Device credential rotation and revocation now write audit records into PostgreSQL
 
 ## Local Kafka
 

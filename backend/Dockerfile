@@ -5,7 +5,6 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY alembic.ini ./
 COPY alembic ./alembic
-COPY device-keys.example.json ./
 COPY app ./app
 
 EXPOSE 8000

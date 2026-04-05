@@ -25,11 +25,13 @@ import httpx
 
 from app.api.routes import alerts as alert_routes
 from app.api.routes import community as community_routes
+from app.api.routes import device as device_routes
 from app.api.routes import ingest as ingest_routes
 from app.api.routes import incidents as incident_routes
 from app.api.routes import jobs as jobs_routes
 import app.main as main
-from app.schemas import AlertHistoryEntry, AnomalyAlert, JobStatus, StationProfile, WaterReading
+from app.schemas import AlertHistoryEntry, AnomalyAlert, DeviceCredentialAuditEntry, DeviceCredentialRotateResponse, JobStatus, StationProfile, WaterReading
+from app.services.auth import get_password_hash
 
 
 UTC = timezone.utc
@@ -39,6 +41,7 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         main.state.last_data_source = "simulated"
         main.state.last_ingest_note = ""
+        main.state.admin_password_hash = get_password_hash("AnomalyGuardTestAdmin!2026")
         main.app.dependency_overrides[main.get_db] = lambda: object()
         main.app.dependency_overrides[main.require_admin] = lambda: {"sub": "test-admin", "role": "admin"}
         self.client = httpx.AsyncClient(
@@ -49,6 +52,18 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.client.aclose()
         main.app.dependency_overrides.clear()
+
+    async def test_login_returns_bearer_token_for_configured_admin(self) -> None:
+        response = await self.client.post(
+            "/api/auth/token",
+            data={"username": "test-admin", "password": "AnomalyGuardTestAdmin!2026"},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["token_type"], "bearer")
+        self.assertIn("access_token", payload)
 
     async def test_ingest_vn_returns_queued_job_and_enqueues_background_task(self) -> None:
         created_jobs: list[dict] = []
@@ -362,6 +377,86 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(review_calls[0]["reviewed_by"], "test-admin")
         broadcast.assert_awaited_once()
         self.assertEqual(broadcast.await_args.args[0], "alert_review")
+
+    async def test_device_telemetry_rejects_invalid_device_key_before_store_access(self) -> None:
+        response = await self.client.post(
+            "/api/device/telemetry",
+            headers={"X-Device-Key": "wrong-key"},
+            json={
+                "station_id": "esp32-device-001",
+                "ph": 7.2,
+                "tds": 410,
+                "waterTemp": 28.0,
+                "temp": 30.0,
+                "hum": 70.0,
+                "weight": 300.0,
+                "isFeeding": False,
+            },
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Invalid device key")
+
+    async def test_rotate_device_credential_returns_issued_key_and_broadcasts(self) -> None:
+        now = datetime.now(UTC)
+        broadcast = AsyncMock()
+        rotated = DeviceCredentialRotateResponse(
+            station_id="esp32-device-009",
+            issued_key="rotated-key-009",
+            key_fingerprint="deadbeef0099",
+            event_type="provisioned",
+            rotated_at=now,
+            rotated_by="test-admin",
+            note="Issued during onboarding",
+        )
+
+        with patch.object(device_routes, "rotate_device_key", return_value=rotated), patch.object(
+            device_routes,
+            "broadcast",
+            broadcast,
+        ):
+            response = await self.client.post(
+                "/api/device/credentials/esp32-device-009/rotate",
+                json={"note": "Issued during onboarding"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["station_id"], "esp32-device-009")
+        self.assertEqual(payload["event_type"], "provisioned")
+        self.assertEqual(payload["issued_key"], "rotated-key-009")
+        broadcast.assert_awaited_once()
+        self.assertEqual(broadcast.await_args.args[0], "device_credential_event")
+
+    async def test_revoke_device_credential_returns_audit_entry(self) -> None:
+        now = datetime.now(UTC)
+        broadcast = AsyncMock()
+        revoked = DeviceCredentialAuditEntry(
+            id=7,
+            station_id="esp32-device-002",
+            event_type="revoked",
+            actor="test-admin",
+            key_fingerprint="revoked002",
+            note="Device decommissioned",
+            metadata_payload={"registry_path": "/tmp/device_keys.json"},
+            created_at=now,
+        )
+
+        with patch.object(device_routes, "revoke_device_key", return_value=revoked), patch.object(
+            device_routes,
+            "broadcast",
+            broadcast,
+        ):
+            response = await self.client.post(
+                "/api/device/credentials/esp32-device-002/revoke",
+                json={"note": "Device decommissioned"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["event_type"], "revoked")
+        self.assertEqual(payload["station_id"], "esp32-device-002")
+        broadcast.assert_awaited_once()
 
     async def test_export_labeled_alerts_returns_filtered_json_payload(self) -> None:
         now = datetime.now(UTC)

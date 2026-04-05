@@ -29,12 +29,15 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://anomaly:anomaly@db:5432/anomalyguard"
     jwt_secret_key: str = ""
+    jwt_secret_key_file: str = ""
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 120
 
     admin_username: str = "admin"
     admin_password: str = ""
+    admin_password_file: str = ""
     device_api_key: str = ""
+    device_api_key_file: str = ""
     device_keys_path: str = ""
     cors_allow_origins: str = ""
     cors_allow_origin_regex: str = ""
@@ -50,20 +53,34 @@ class Settings(BaseSettings):
     mlflow_tracking_uri: str = "file:./mlruns"
     community_impact_profile_path: str = ""
 
-    @field_validator("device_keys_path")
+    @field_validator("device_keys_path", "jwt_secret_key_file", "admin_password_file", "device_api_key_file")
     @classmethod
-    def validate_device_keys_path(cls, value: str) -> str:
-        if not value:
-            return ""
-        backend_root = Path(__file__).resolve().parents[1]
-        candidate_paths = [Path(value), backend_root / value]
-        for path in candidate_paths:
-            if path.exists() and path.is_file():
-                return str(path)
-        raise ValueError("DEVICE_KEYS_PATH must point to an existing JSON file")
+    def normalize_optional_path(cls, value: str) -> str:
+        return value.strip()
 
     @model_validator(mode="after")
-    def validate_security_controls(self) -> "Settings":
+    def resolve_secrets_and_validate(self) -> "Settings":
+        self.jwt_secret_key = self._resolve_secret_value(
+            field_name="JWT_SECRET_KEY",
+            value=self.jwt_secret_key,
+            file_value=self.jwt_secret_key_file,
+        )
+        self.admin_password = self._resolve_secret_value(
+            field_name="ADMIN_PASSWORD",
+            value=self.admin_password,
+            file_value=self.admin_password_file,
+        )
+        self.device_api_key = self._resolve_secret_value(
+            field_name="DEVICE_API_KEY",
+            value=self.device_api_key,
+            file_value=self.device_api_key_file,
+        )
+        self.device_keys_path = self._resolve_optional_existing_path(
+            "DEVICE_KEYS_PATH",
+            self.device_keys_path,
+            required=not bool(self.device_api_key),
+        )
+
         strict_mode = not self.allow_insecure_defaults
 
         if self.app_env in {"staging", "production"} and self.allow_insecure_defaults:
@@ -81,6 +98,26 @@ class Settings(BaseSettings):
 
         return self
 
+    def _resolve_optional_existing_path(self, field_name: str, value: str, *, required: bool) -> str:
+        if not value:
+            return ""
+        path = self._resolve_path(value)
+        if path is None or not path.exists() or not path.is_file():
+            if not required:
+                return ""
+            raise ValueError(f"{field_name} must point to an existing file")
+        return str(path)
+
+    def _resolve_secret_value(self, *, field_name: str, value: str, file_value: str) -> str:
+        if value:
+            return value
+        if not file_value:
+            return value
+        path = self._resolve_path(file_value)
+        if path is None or not path.exists() or not path.is_file():
+            raise ValueError(f"{field_name}_FILE must point to an existing file")
+        return path.read_text(encoding="utf-8").strip()
+
     @property
     def cors_allowed_origins(self) -> list[str]:
         value = self.cors_allow_origins.strip()
@@ -96,6 +133,16 @@ class Settings(BaseSettings):
     def _validate_secret(self, field_name: str, value: str, *, minimum_length: int) -> None:
         if value in _INSECURE_SECRET_VALUES or len(value) < minimum_length:
             raise ValueError(f"{field_name} must be explicitly configured with a stronger value")
+
+    def _resolve_path(self, value: str) -> Path | None:
+        if not value:
+            return None
+        backend_root = Path(__file__).resolve().parents[1]
+        candidate_paths = [Path(value), backend_root / value]
+        for path in candidate_paths:
+            if path.exists():
+                return path
+        return candidate_paths[0]
 
 
 settings = Settings()
