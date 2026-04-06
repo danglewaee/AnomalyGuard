@@ -46,7 +46,14 @@ jobs:
         run: docker compose up -d db redis kafka backend
       - name: Run platform integration smoke
         shell: pwsh
-        run: .\scripts\platform-integration-smoke.ps1
+        run: .\scripts\platform-integration-smoke.ps1 -SummaryPath artifacts\integration-smoke-summary.json
+      - name: Upload integration summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-smoke-summary
+          path: artifacts/integration-smoke-summary.json
+          if-no-files-found: warn
       - name: Dump integration stack state
         if: failure()
         run: docker compose ps

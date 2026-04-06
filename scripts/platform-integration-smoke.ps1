@@ -1,5 +1,6 @@
 param(
-    [switch]$ManageStack
+    [switch]$ManageStack,
+    [string]$SummaryPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -39,6 +40,34 @@ function Assert-DockerDaemonAvailable {
         }
         throw "Docker daemon is not available. $details"
     }
+}
+
+function Invoke-ComposeCommand {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Arguments
+    )
+
+    return & docker @composeArgs @Arguments
+}
+
+function Format-SqlLiteral {
+    param([string]$Value)
+    return "'$($Value.Replace("'", "''"))'"
+}
+
+function Invoke-PostgresScalar {
+    param([string]$Sql)
+
+    $output = Invoke-ComposeCommand "exec" "-T" "db" "psql" "-U" "anomaly" "-d" "anomalyguard" "-tA" "-c" $Sql
+    return (($output | Out-String).Trim())
+}
+
+function Invoke-PostgresRow {
+    param([string]$Sql)
+
+    $output = Invoke-ComposeCommand "exec" "-T" "db" "psql" "-U" "anomaly" "-d" "anomalyguard" "-tA" "-F" "|" "-c" $Sql
+    return (($output | Out-String).Trim())
 }
 
 function Wait-ForApi {
@@ -100,20 +129,32 @@ function Assert-Condition {
     }
 }
 
-if ($ManageStack) {
-    Initialize-DockerCliConfig
-    Assert-DockerDaemonAvailable
-    & (Join-Path $PSScriptRoot "bootstrap-local-secrets.ps1")
-    docker @composeArgs up -d db redis kafka backend | Out-Host
+$summary = [ordered]@{
+    checked_at = [DateTime]::UtcNow.ToString("o")
+    status = "running"
+    error = ""
+    station_id = ""
+    alert_id = ""
+    schema_revision = ""
+    api = [ordered]@{}
+    database = [ordered]@{}
+    kafka = [ordered]@{}
+    device_credentials = [ordered]@{}
 }
+$stackStarted = $false
 
 try {
-    if (-not $ManageStack) {
-        Initialize-DockerCliConfig
-        Assert-DockerDaemonAvailable
+    Initialize-DockerCliConfig
+    Assert-DockerDaemonAvailable
+
+    if ($ManageStack) {
+        & (Join-Path $PSScriptRoot "bootstrap-local-secrets.ps1")
+        Invoke-ComposeCommand "up" "-d" "db" "redis" "kafka" "backend" | Out-Host
+        $stackStarted = $true
     }
 
     $health = Wait-ForApi -Url $baseUrl
+    $summary.schema_revision = $health.schema_revision
     Write-Host "API healthy with schema revision $($health.schema_revision)"
 
     $adminPassword = (Get-Content (Join-Path $backendSecretsDir "admin_password.txt") -Raw).Trim()
@@ -128,6 +169,7 @@ try {
 
     $authHeaders = @{ Authorization = "Bearer $token" }
     $stationId = "integration-device-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+    $summary.station_id = $stationId
 
     $rotateResponse = Invoke-JsonRequest `
         -Method Post `
@@ -136,6 +178,8 @@ try {
         -Body @{ note = "Integration smoke rotation" }
     Assert-Condition ($rotateResponse.station_id -eq $stationId) "Rotate endpoint returned wrong station."
     Assert-Condition ($rotateResponse.issued_key.Length -gt 20) "Rotate endpoint did not issue a usable key."
+    $summary.device_credentials.rotate_event_type = $rotateResponse.event_type
+    $summary.device_credentials.key_fingerprint = $rotateResponse.key_fingerprint
 
     $telemetryHeaders = @{ "X-Device-Key" = $rotateResponse.issued_key }
     $telemetryBody = @{
@@ -162,6 +206,13 @@ try {
         -Headers $telemetryHeaders `
         -Body $telemetryBody
     Assert-Condition ($telemetryResponse.generated_alert.id.Length -gt 0) "Telemetry did not generate an alert."
+    $summary.alert_id = $telemetryResponse.generated_alert.id
+    $summary.api.generated_alert = [ordered]@{
+        id = $telemetryResponse.generated_alert.id
+        station_id = $telemetryResponse.generated_alert.station_id
+        severity = $telemetryResponse.generated_alert.severity
+        score = $telemetryResponse.generated_alert.score
+    }
 
     $alerts = $null
     $alertDeadline = (Get-Date).AddSeconds(20)
@@ -173,6 +224,49 @@ try {
         Start-Sleep -Seconds 2
     }
     Assert-Condition (($alerts | Measure-Object).Count -ge 1) "Alert feed did not return the integration alert."
+    $apiAlert = $alerts | Where-Object { $_.id -eq $telemetryResponse.generated_alert.id } | Select-Object -First 1
+    Assert-Condition ($null -ne $apiAlert) "Alert feed did not return the generated alert id."
+    $summary.api.latest_alert = [ordered]@{
+        id = $apiAlert.id
+        station_id = $apiAlert.station_id
+        severity = $apiAlert.severity
+        score = $apiAlert.score
+        incident_status = $apiAlert.incident_status
+    }
+
+    $stationSql = Format-SqlLiteral $stationId
+    $alertSql = Format-SqlLiteral $telemetryResponse.generated_alert.id
+    $dbAlertRow = Invoke-PostgresRow "SELECT id, station_id, severity, score::text FROM alerts WHERE id = $alertSql LIMIT 1;"
+    Assert-Condition (-not [string]::IsNullOrWhiteSpace($dbAlertRow)) "Alert record was not persisted to PostgreSQL."
+    $dbAlertParts = $dbAlertRow.Split("|")
+    Assert-Condition ($dbAlertParts.Length -ge 4) "Alert record query returned an unexpected shape."
+    Assert-Condition ($dbAlertParts[0] -eq $telemetryResponse.generated_alert.id) "PostgreSQL alert id does not match API alert."
+    Assert-Condition ($dbAlertParts[1] -eq $stationId) "PostgreSQL alert station does not match API alert."
+    Assert-Condition ($dbAlertParts[2] -eq $telemetryResponse.generated_alert.severity) "PostgreSQL alert severity does not match API alert."
+
+    $readingCount = [int](Invoke-PostgresScalar "SELECT COUNT(*) FROM readings WHERE station_id = $stationSql;")
+    $alertCount = [int](Invoke-PostgresScalar "SELECT COUNT(*) FROM alerts WHERE station_id = $stationSql;")
+    $incidentCount = [int](Invoke-PostgresScalar "SELECT COUNT(*) FROM incidents WHERE station_id = $stationSql;")
+    $incidentEventCount = [int](Invoke-PostgresScalar "SELECT COUNT(*) FROM incident_events WHERE alert_id = $alertSql;")
+    $deviceStateCount = [int](Invoke-PostgresScalar "SELECT COUNT(*) FROM device_states WHERE station_id = $stationSql;")
+    Assert-Condition ($readingCount -ge 1) "Expected at least one reading record for the integration station."
+    Assert-Condition ($alertCount -ge 1) "Expected at least one alert record for the integration station."
+    Assert-Condition ($incidentCount -ge 1) "Expected an incident record for the integration station."
+    Assert-Condition ($incidentEventCount -ge 1) "Expected at least one incident history entry for the integration alert."
+    Assert-Condition ($deviceStateCount -eq 1) "Expected exactly one device state record for the integration station."
+    $summary.database = [ordered]@{
+        readings = $readingCount
+        alerts = $alertCount
+        incidents = $incidentCount
+        incident_events = $incidentEventCount
+        device_states = $deviceStateCount
+        alert_row = [ordered]@{
+            id = $dbAlertParts[0]
+            station_id = $dbAlertParts[1]
+            severity = $dbAlertParts[2]
+            score = $dbAlertParts[3]
+        }
+    }
 
     $auditEntries = Invoke-JsonRequest `
         -Method Get `
@@ -180,12 +274,40 @@ try {
         -Headers $authHeaders
     Assert-Condition (($auditEntries | Measure-Object).Count -ge 1) "Device credential audit is empty."
     Assert-Condition ($auditEntries[0].event_type -in @("provisioned", "rotated")) "Unexpected audit event type."
+    $summary.device_credentials.audit_events_before_revoke = ($auditEntries | Measure-Object).Count
 
     $inventory = Invoke-JsonRequest -Method Get -Uri "$baseUrl/api/device/credentials" -Headers $authHeaders
     Assert-Condition (($inventory | Where-Object { $_.station_id -eq $stationId }).Count -eq 1) "Credential inventory missing rotated device."
+    $summary.device_credentials.inventory_count_before_revoke = (($inventory | Where-Object { $_.station_id -eq $stationId }) | Measure-Object).Count
 
-    $consumerOutput = docker @composeArgs exec -T kafka sh -lc "/opt/bitnami/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic anomaly-alerts --from-beginning --timeout-ms 10000 --max-messages 20"
-    Assert-Condition (($consumerOutput -join "`n") -match $stationId) "Kafka topic did not contain the integration alert."
+    $consumerOutput = Invoke-ComposeCommand "exec" "-T" "kafka" "sh" "-lc" "/opt/bitnami/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic anomaly-alerts --from-beginning --timeout-ms 10000 --max-messages 20"
+    $consumerLines = @($consumerOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $matchingKafkaLines = @($consumerLines | Where-Object { $_ -match $stationId })
+    Assert-Condition ($matchingKafkaLines.Count -ge 1) "Kafka topic did not contain the integration alert."
+    $matchingKafkaMessage = $null
+    foreach ($line in $matchingKafkaLines) {
+        try {
+            $message = $line | ConvertFrom-Json
+        } catch {
+            continue
+        }
+        if ($message.id -eq $telemetryResponse.generated_alert.id) {
+            $matchingKafkaMessage = $message
+            break
+        }
+    }
+    Assert-Condition ($null -ne $matchingKafkaMessage) "Kafka topic did not contain the generated alert id."
+    Assert-Condition ($matchingKafkaMessage.station_id -eq $stationId) "Kafka alert station does not match API alert."
+    Assert-Condition ($matchingKafkaMessage.severity -eq $telemetryResponse.generated_alert.severity) "Kafka alert severity does not match API alert."
+    $summary.kafka = [ordered]@{
+        matched_messages = $matchingKafkaLines.Count
+        alert = [ordered]@{
+            id = $matchingKafkaMessage.id
+            station_id = $matchingKafkaMessage.station_id
+            severity = $matchingKafkaMessage.severity
+            score = $matchingKafkaMessage.score
+        }
+    }
 
     $revokeResponse = Invoke-JsonRequest `
         -Method Post `
@@ -193,13 +315,31 @@ try {
         -Headers $authHeaders `
         -Body @{ note = "Integration smoke revoke" }
     Assert-Condition ($revokeResponse.event_type -eq "revoked") "Revoke endpoint did not return a revoke event."
+    $summary.device_credentials.revoke_event_type = $revokeResponse.event_type
 
     $inventoryAfterRevoke = Invoke-JsonRequest -Method Get -Uri "$baseUrl/api/device/credentials" -Headers $authHeaders
     Assert-Condition (($inventoryAfterRevoke | Where-Object { $_.station_id -eq $stationId }).Count -eq 0) "Revoked device still present in inventory."
+    $credentialEventCount = [int](Invoke-PostgresScalar "SELECT COUNT(*) FROM device_credential_events WHERE station_id = $stationSql;")
+    Assert-Condition ($credentialEventCount -ge 2) "Expected both rotate and revoke credential events in PostgreSQL."
+    $summary.device_credentials.inventory_count_after_revoke = (($inventoryAfterRevoke | Where-Object { $_.station_id -eq $stationId }) | Measure-Object).Count
+    $summary.device_credentials.audit_events_in_db = $credentialEventCount
 
+    $summary.status = "passed"
     Write-Host "Integration smoke passed for station $stationId"
+} catch {
+    $summary.status = "failed"
+    $summary.error = $_.Exception.Message
+    throw
 } finally {
-    if ($ManageStack) {
-        docker @composeArgs down -v | Out-Host
+    if (-not [string]::IsNullOrWhiteSpace($SummaryPath)) {
+        $summaryDir = Split-Path -Parent $SummaryPath
+        if (-not [string]::IsNullOrWhiteSpace($summaryDir)) {
+            New-Item -ItemType Directory -Force -Path $summaryDir | Out-Null
+        }
+        $summary | ConvertTo-Json -Depth 10 | Set-Content -Path $SummaryPath
+    }
+
+    if ($ManageStack -and $stackStarted) {
+        Invoke-ComposeCommand "down" "-v" | Out-Host
     }
 }
