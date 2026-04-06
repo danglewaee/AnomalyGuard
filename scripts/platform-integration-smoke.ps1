@@ -110,6 +110,144 @@ function Wait-ForJob {
     throw "Job $JobId did not finish within $TimeoutSeconds seconds."
 }
 
+function Open-WebSocketClient {
+    param([string]$Url)
+
+    $webSocket = New-Object System.Net.WebSockets.ClientWebSocket
+    $webSocket.Options.KeepAliveInterval = [TimeSpan]::FromSeconds(20)
+    $cts = New-Object System.Threading.CancellationTokenSource
+    try {
+        $webSocket.ConnectAsync([Uri]$Url, $cts.Token).GetAwaiter().GetResult()
+    } finally {
+        $cts.Dispose()
+    }
+    return $webSocket
+}
+
+function Get-JsonPropertyValue {
+    param(
+        [object]$Object,
+        [string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+
+function Receive-WebSocketJson {
+    param(
+        [System.Net.WebSockets.ClientWebSocket]$WebSocket,
+        [int]$TimeoutSeconds = 15
+    )
+
+    $buffer = New-Object byte[] 4096
+    $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList @(,$buffer)
+    $stream = New-Object System.IO.MemoryStream
+    $cts = New-Object System.Threading.CancellationTokenSource
+    $cts.CancelAfter([TimeSpan]::FromSeconds($TimeoutSeconds))
+
+    try {
+        do {
+            $result = $WebSocket.ReceiveAsync($segment, $cts.Token).GetAwaiter().GetResult()
+            if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
+                throw "WebSocket closed by server."
+            }
+            if ($result.Count -gt 0) {
+                $stream.Write($buffer, 0, $result.Count)
+            }
+        } while (-not $result.EndOfMessage)
+
+        $jsonText = [System.Text.Encoding]::UTF8.GetString($stream.ToArray())
+        return ($jsonText | ConvertFrom-Json)
+    } catch [System.OperationCanceledException] {
+        throw "Timed out waiting for WebSocket message."
+    } finally {
+        $cts.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Test-WebSocketEventMatch {
+    param(
+        [object]$Message,
+        [string]$EventName,
+        [string]$ExpectedStationId = "",
+        [string]$ExpectedAlertId = "",
+        [string]$ExpectedPayloadKey = "",
+        [string]$ExpectedPayloadValue = ""
+    )
+
+    if ((Get-JsonPropertyValue $Message "event") -ne $EventName) {
+        return $false
+    }
+
+    $payload = Get-JsonPropertyValue $Message "payload"
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedStationId)) {
+        if ((Get-JsonPropertyValue $payload "station_id") -ne $ExpectedStationId) {
+            return $false
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedAlertId)) {
+        $candidateAlertId = Get-JsonPropertyValue $payload "id"
+        if ([string]::IsNullOrWhiteSpace($candidateAlertId)) {
+            $candidateAlertId = Get-JsonPropertyValue $payload "alert_id"
+        }
+        if ($candidateAlertId -ne $ExpectedAlertId) {
+            return $false
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedPayloadKey)) {
+        $candidateValue = Get-JsonPropertyValue $payload $ExpectedPayloadKey
+        if ("$candidateValue" -ne $ExpectedPayloadValue) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Wait-ForWebSocketEvent {
+    param(
+        [System.Net.WebSockets.ClientWebSocket]$WebSocket,
+        [System.Collections.ArrayList]$Buffer,
+        [string]$EventName,
+        [int]$TimeoutSeconds = 20,
+        [string]$ExpectedStationId = "",
+        [string]$ExpectedAlertId = "",
+        [string]$ExpectedPayloadKey = "",
+        [string]$ExpectedPayloadValue = ""
+    )
+
+    for ($index = 0; $index -lt $Buffer.Count; $index++) {
+        $buffered = $Buffer[$index]
+        if (Test-WebSocketEventMatch -Message $buffered -EventName $EventName -ExpectedStationId $ExpectedStationId -ExpectedAlertId $ExpectedAlertId -ExpectedPayloadKey $ExpectedPayloadKey -ExpectedPayloadValue $ExpectedPayloadValue) {
+            $Buffer.RemoveAt($index)
+            return $buffered
+        }
+    }
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $remaining = [Math]::Max(1, [int][Math]::Ceiling(($deadline - (Get-Date)).TotalSeconds))
+        $message = Receive-WebSocketJson -WebSocket $WebSocket -TimeoutSeconds $remaining
+        if (Test-WebSocketEventMatch -Message $message -EventName $EventName -ExpectedStationId $ExpectedStationId -ExpectedAlertId $ExpectedAlertId -ExpectedPayloadKey $ExpectedPayloadKey -ExpectedPayloadValue $ExpectedPayloadValue) {
+            return $message
+        }
+        [void]$Buffer.Add($message)
+    }
+
+    throw "Timed out waiting for WebSocket event '$EventName'."
+}
+
 function Invoke-JsonRequest {
     param(
         [string]$Method,
@@ -158,10 +296,16 @@ $summary = [ordered]@{
     api = [ordered]@{}
     database = [ordered]@{}
     kafka = [ordered]@{}
+    websocket = [ordered]@{
+        bootstrap = [ordered]@{}
+        observed_events = @()
+    }
     device_credentials = [ordered]@{}
     jobs = [ordered]@{}
 }
 $stackStarted = $false
+$webSocket = $null
+$webSocketBuffer = New-Object System.Collections.ArrayList
 
 try {
     Initialize-DockerCliConfig
@@ -189,6 +333,22 @@ try {
 
     $authHeaders = @{ Authorization = "Bearer $token" }
     $metaBefore = Invoke-JsonRequest -Method Get -Uri "$baseUrl/api/meta" -Headers $authHeaders
+    $webSocket = Open-WebSocketClient -Url "ws://localhost:8000/ws/stream"
+    $bootstrapMessage = Wait-ForWebSocketEvent -WebSocket $webSocket -Buffer $webSocketBuffer -EventName "bootstrap" -TimeoutSeconds 20
+    $bootstrapPayload = Get-JsonPropertyValue $bootstrapMessage "payload"
+    Assert-Condition ($null -ne (Get-JsonPropertyValue $bootstrapPayload "meta")) "WebSocket bootstrap payload is missing meta."
+    Assert-Condition ($null -ne (Get-JsonPropertyValue $bootstrapPayload "stations")) "WebSocket bootstrap payload is missing stations."
+    Assert-Condition ($null -ne (Get-JsonPropertyValue $bootstrapPayload "readings")) "WebSocket bootstrap payload is missing readings."
+    Assert-Condition ($null -ne (Get-JsonPropertyValue $bootstrapPayload "alerts")) "WebSocket bootstrap payload is missing alerts."
+    Assert-Condition ($null -ne (Get-JsonPropertyValue $bootstrapPayload "device_statuses")) "WebSocket bootstrap payload is missing device_statuses."
+    Assert-Condition ((Get-JsonPropertyValue (Get-JsonPropertyValue $bootstrapPayload "meta") "schema_revision") -eq $health.schema_revision) "WebSocket bootstrap schema revision does not match /health."
+    $summary.websocket.bootstrap = [ordered]@{
+        schema_revision = Get-JsonPropertyValue (Get-JsonPropertyValue $bootstrapPayload "meta") "schema_revision"
+        stations = @((Get-JsonPropertyValue $bootstrapPayload "stations")).Count
+        readings = @((Get-JsonPropertyValue $bootstrapPayload "readings")).Count
+        alerts = @((Get-JsonPropertyValue $bootstrapPayload "alerts")).Count
+        device_statuses = @((Get-JsonPropertyValue $bootstrapPayload "device_statuses")).Count
+    }
     $stationId = "integration-device-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
     $summary.station_id = $stationId
 
@@ -201,6 +361,12 @@ try {
     Assert-Condition ($rotateResponse.issued_key.Length -gt 20) "Rotate endpoint did not issue a usable key."
     $summary.device_credentials.rotate_event_type = $rotateResponse.event_type
     $summary.device_credentials.key_fingerprint = $rotateResponse.key_fingerprint
+    $rotateWsEvent = Wait-ForWebSocketEvent -WebSocket $webSocket -Buffer $webSocketBuffer -EventName "device_credential_event" -TimeoutSeconds 20 -ExpectedStationId $stationId -ExpectedPayloadKey "event_type" -ExpectedPayloadValue $rotateResponse.event_type
+    $summary.websocket.observed_events += [ordered]@{
+        event = Get-JsonPropertyValue $rotateWsEvent "event"
+        station_id = Get-JsonPropertyValue (Get-JsonPropertyValue $rotateWsEvent "payload") "station_id"
+        event_type = Get-JsonPropertyValue (Get-JsonPropertyValue $rotateWsEvent "payload") "event_type"
+    }
 
     $telemetryHeaders = @{ "X-Device-Key" = $rotateResponse.issued_key }
     $telemetryBody = @{
@@ -233,6 +399,22 @@ try {
         station_id = $telemetryResponse.generated_alert.station_id
         severity = $telemetryResponse.generated_alert.severity
         score = $telemetryResponse.generated_alert.score
+    }
+    $deviceStatusWsEvent = Wait-ForWebSocketEvent -WebSocket $webSocket -Buffer $webSocketBuffer -EventName "device_status" -TimeoutSeconds 20 -ExpectedStationId $stationId
+    $readingWsEvent = Wait-ForWebSocketEvent -WebSocket $webSocket -Buffer $webSocketBuffer -EventName "reading" -TimeoutSeconds 20 -ExpectedStationId $stationId
+    $alertWsEvent = Wait-ForWebSocketEvent -WebSocket $webSocket -Buffer $webSocketBuffer -EventName "alert" -TimeoutSeconds 20 -ExpectedStationId $stationId -ExpectedAlertId $telemetryResponse.generated_alert.id
+    $summary.websocket.observed_events += [ordered]@{
+        event = Get-JsonPropertyValue $deviceStatusWsEvent "event"
+        station_id = Get-JsonPropertyValue (Get-JsonPropertyValue $deviceStatusWsEvent "payload") "station_id"
+    }
+    $summary.websocket.observed_events += [ordered]@{
+        event = Get-JsonPropertyValue $readingWsEvent "event"
+        station_id = Get-JsonPropertyValue (Get-JsonPropertyValue $readingWsEvent "payload") "station_id"
+    }
+    $summary.websocket.observed_events += [ordered]@{
+        event = Get-JsonPropertyValue $alertWsEvent "event"
+        station_id = Get-JsonPropertyValue (Get-JsonPropertyValue $alertWsEvent "payload") "station_id"
+        alert_id = Get-JsonPropertyValue (Get-JsonPropertyValue $alertWsEvent "payload") "id"
     }
 
     $alerts = $null
@@ -301,16 +483,37 @@ try {
     Assert-Condition (($inventory | Where-Object { $_.station_id -eq $stationId }).Count -eq 1) "Credential inventory missing rotated device."
     $summary.device_credentials.inventory_count_before_revoke = (($inventory | Where-Object { $_.station_id -eq $stationId }) | Measure-Object).Count
 
+    $ackResponse = Invoke-JsonRequest `
+        -Method Post `
+        -Uri "$baseUrl/api/incidents/$($telemetryResponse.generated_alert.id)/acknowledge" `
+        -Headers $authHeaders `
+        -Body @{ note = "Integration smoke acknowledge" }
+    Assert-Condition ($ackResponse.incident_status -eq "acknowledged") "Incident acknowledge did not persist the expected status."
+    $incidentWsEvent = Wait-ForWebSocketEvent -WebSocket $webSocket -Buffer $webSocketBuffer -EventName "incident_status" -TimeoutSeconds 20 -ExpectedStationId $stationId -ExpectedAlertId $telemetryResponse.generated_alert.id
+    $summary.websocket.observed_events += [ordered]@{
+        event = Get-JsonPropertyValue $incidentWsEvent "event"
+        station_id = Get-JsonPropertyValue (Get-JsonPropertyValue $incidentWsEvent "payload") "station_id"
+        alert_id = Get-JsonPropertyValue (Get-JsonPropertyValue $incidentWsEvent "payload") "id"
+        incident_status = Get-JsonPropertyValue (Get-JsonPropertyValue $incidentWsEvent "payload") "incident_status"
+    }
+
     $reviewResponse = Invoke-JsonRequest `
         -Method Post `
         -Uri "$baseUrl/api/alerts/$($telemetryResponse.generated_alert.id)/review" `
         -Headers $authHeaders `
         -Body @{ label = "true_anomaly"; note = "Integration smoke review" }
     Assert-Condition ($reviewResponse.review_label -eq "true_anomaly") "Alert review did not persist the expected label."
+    $reviewWsEvent = Wait-ForWebSocketEvent -WebSocket $webSocket -Buffer $webSocketBuffer -EventName "alert_review" -TimeoutSeconds 20 -ExpectedStationId $stationId -ExpectedAlertId $telemetryResponse.generated_alert.id
     $summary.api.reviewed_alert = [ordered]@{
         id = $reviewResponse.id
         review_label = $reviewResponse.review_label
         reviewed_by = $reviewResponse.reviewed_by
+    }
+    $summary.websocket.observed_events += [ordered]@{
+        event = Get-JsonPropertyValue $reviewWsEvent "event"
+        station_id = Get-JsonPropertyValue (Get-JsonPropertyValue $reviewWsEvent "payload") "station_id"
+        alert_id = Get-JsonPropertyValue (Get-JsonPropertyValue $reviewWsEvent "payload") "id"
+        review_label = Get-JsonPropertyValue (Get-JsonPropertyValue $reviewWsEvent "payload") "review_label"
     }
 
     $trainingJob = Invoke-JsonRequest `
@@ -402,6 +605,12 @@ try {
         -Body @{ note = "Integration smoke revoke" }
     Assert-Condition ($revokeResponse.event_type -eq "revoked") "Revoke endpoint did not return a revoke event."
     $summary.device_credentials.revoke_event_type = $revokeResponse.event_type
+    $revokeWsEvent = Wait-ForWebSocketEvent -WebSocket $webSocket -Buffer $webSocketBuffer -EventName "device_credential_event" -TimeoutSeconds 20 -ExpectedStationId $stationId -ExpectedPayloadKey "event_type" -ExpectedPayloadValue "revoked"
+    $summary.websocket.observed_events += [ordered]@{
+        event = Get-JsonPropertyValue $revokeWsEvent "event"
+        station_id = Get-JsonPropertyValue (Get-JsonPropertyValue $revokeWsEvent "payload") "station_id"
+        event_type = Get-JsonPropertyValue (Get-JsonPropertyValue $revokeWsEvent "payload") "event_type"
+    }
 
     $inventoryAfterRevoke = Invoke-JsonRequest -Method Get -Uri "$baseUrl/api/device/credentials" -Headers $authHeaders
     Assert-Condition (($inventoryAfterRevoke | Where-Object { $_.station_id -eq $stationId }).Count -eq 0) "Revoked device still present in inventory."
@@ -423,6 +632,26 @@ try {
             New-Item -ItemType Directory -Force -Path $summaryDir | Out-Null
         }
         $summary | ConvertTo-Json -Depth 10 | Set-Content -Path $SummaryPath
+    }
+
+    if ($null -ne $webSocket) {
+        try {
+            if ($webSocket.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+                $cts = New-Object System.Threading.CancellationTokenSource
+                try {
+                    $webSocket.CloseAsync(
+                        [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
+                        "integration-complete",
+                        $cts.Token
+                    ).GetAwaiter().GetResult()
+                } finally {
+                    $cts.Dispose()
+                }
+            }
+        } catch {
+        } finally {
+            $webSocket.Dispose()
+        }
     }
 
     if ($ManageStack -and $stackStarted) {
