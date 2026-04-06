@@ -91,6 +91,25 @@ function Wait-ForApi {
     throw "API did not become healthy within $TimeoutSeconds seconds."
 }
 
+function Wait-ForJob {
+    param(
+        [string]$JobId,
+        [hashtable]$Headers,
+        [int]$TimeoutSeconds = 90
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $job = Invoke-JsonRequest -Method Get -Uri "$baseUrl/api/jobs/$JobId" -Headers $Headers
+        if ($job.status -in @("succeeded", "failed")) {
+            return $job
+        }
+        Start-Sleep -Seconds 2
+    }
+
+    throw "Job $JobId did not finish within $TimeoutSeconds seconds."
+}
+
 function Invoke-JsonRequest {
     param(
         [string]$Method,
@@ -140,6 +159,7 @@ $summary = [ordered]@{
     database = [ordered]@{}
     kafka = [ordered]@{}
     device_credentials = [ordered]@{}
+    jobs = [ordered]@{}
 }
 $stackStarted = $false
 
@@ -149,7 +169,7 @@ try {
 
     if ($ManageStack) {
         & (Join-Path $PSScriptRoot "bootstrap-local-secrets.ps1")
-        Invoke-ComposeCommand "up" "-d" "db" "redis" "kafka" "backend" | Out-Host
+        Invoke-ComposeCommand "up" "-d" "db" "redis" "kafka" "backend" "celery-worker" | Out-Host
         $stackStarted = $true
     }
 
@@ -168,6 +188,7 @@ try {
     Assert-Condition ($token.Length -gt 20) "Failed to obtain admin token."
 
     $authHeaders = @{ Authorization = "Bearer $token" }
+    $metaBefore = Invoke-JsonRequest -Method Get -Uri "$baseUrl/api/meta" -Headers $authHeaders
     $stationId = "integration-device-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
     $summary.station_id = $stationId
 
@@ -279,6 +300,71 @@ try {
     $inventory = Invoke-JsonRequest -Method Get -Uri "$baseUrl/api/device/credentials" -Headers $authHeaders
     Assert-Condition (($inventory | Where-Object { $_.station_id -eq $stationId }).Count -eq 1) "Credential inventory missing rotated device."
     $summary.device_credentials.inventory_count_before_revoke = (($inventory | Where-Object { $_.station_id -eq $stationId }) | Measure-Object).Count
+
+    $reviewResponse = Invoke-JsonRequest `
+        -Method Post `
+        -Uri "$baseUrl/api/alerts/$($telemetryResponse.generated_alert.id)/review" `
+        -Headers $authHeaders `
+        -Body @{ label = "true_anomaly"; note = "Integration smoke review" }
+    Assert-Condition ($reviewResponse.review_label -eq "true_anomaly") "Alert review did not persist the expected label."
+    $summary.api.reviewed_alert = [ordered]@{
+        id = $reviewResponse.id
+        review_label = $reviewResponse.review_label
+        reviewed_by = $reviewResponse.reviewed_by
+    }
+
+    $trainingJob = Invoke-JsonRequest `
+        -Method Post `
+        -Uri "$baseUrl/api/alerts/labeled/retraining-jobs" `
+        -Headers $authHeaders `
+        -Body @{
+            station_id = $stationId
+            since_minutes = 60
+            limit = 100
+            recent_count = 10
+        }
+    Assert-Condition ($trainingJob.job_type -eq "prepare_retraining_run") "Retraining prep endpoint returned the wrong job type."
+
+    $completedTrainingJob = Wait-ForJob -JobId $trainingJob.id -Headers $authHeaders -TimeoutSeconds 90
+    Assert-Condition ($completedTrainingJob.status -eq "succeeded") "Retraining prep job did not succeed."
+    Assert-Condition (-not [string]::IsNullOrWhiteSpace($completedTrainingJob.started_at)) "Retraining prep job never recorded started_at."
+    Assert-Condition (-not [string]::IsNullOrWhiteSpace($completedTrainingJob.completed_at)) "Retraining prep job never recorded completed_at."
+    Assert-Condition ($completedTrainingJob.result_payload.manifest.manifest_id.Length -gt 0) "Retraining prep job manifest is missing."
+    Assert-Condition ($completedTrainingJob.result_payload.export_urls.json.Length -gt 0) "Retraining prep job export URLs are missing."
+    $summary.jobs.retraining_job = [ordered]@{
+        id = $completedTrainingJob.id
+        status = $completedTrainingJob.status
+        started_at = $completedTrainingJob.started_at
+        completed_at = $completedTrainingJob.completed_at
+        ready_for_training = $completedTrainingJob.result_payload.ready_for_training
+        recommendation = $completedTrainingJob.result_payload.recommendation
+        manifest_id = $completedTrainingJob.result_payload.manifest.manifest_id
+    }
+
+    $jobSql = Format-SqlLiteral $completedTrainingJob.id
+    $dbJobRow = Invoke-PostgresRow "SELECT id, job_type, status, COALESCE(started_at::text, ''), COALESCE(completed_at::text, '') FROM jobs WHERE id = $jobSql LIMIT 1;"
+    Assert-Condition (-not [string]::IsNullOrWhiteSpace($dbJobRow)) "Retraining job record was not persisted to PostgreSQL."
+    $dbJobParts = $dbJobRow.Split("|")
+    Assert-Condition ($dbJobParts.Length -ge 5) "Job record query returned an unexpected shape."
+    Assert-Condition ($dbJobParts[0] -eq $completedTrainingJob.id) "PostgreSQL job id does not match API job."
+    Assert-Condition ($dbJobParts[1] -eq "prepare_retraining_run") "PostgreSQL job type does not match retraining flow."
+    Assert-Condition ($dbJobParts[2] -eq "succeeded") "PostgreSQL job status does not match API job."
+    Assert-Condition (-not [string]::IsNullOrWhiteSpace($dbJobParts[3])) "PostgreSQL job started_at is missing."
+    Assert-Condition (-not [string]::IsNullOrWhiteSpace($dbJobParts[4])) "PostgreSQL job completed_at is missing."
+    $summary.jobs.database_row = [ordered]@{
+        id = $dbJobParts[0]
+        job_type = $dbJobParts[1]
+        status = $dbJobParts[2]
+        started_at = $dbJobParts[3]
+        completed_at = $dbJobParts[4]
+    }
+
+    $metaAfterTrainingJob = Invoke-JsonRequest -Method Get -Uri "$baseUrl/api/meta" -Headers $authHeaders
+    Assert-Condition ($metaAfterTrainingJob.data_source -eq $metaBefore.data_source -or $metaAfterTrainingJob.data_source -eq "device/esp32") "Retraining job unexpectedly changed runtime data_source."
+    $summary.jobs.meta_after_retraining = [ordered]@{
+        data_source = $metaAfterTrainingJob.data_source
+        last_ingest_note = $metaAfterTrainingJob.last_ingest_note
+    }
 
     $consumerOutput = Invoke-ComposeCommand "exec" "-T" "kafka" "sh" "-lc" "/opt/bitnami/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic anomaly-alerts --from-beginning --timeout-ms 10000 --max-messages 20"
     $consumerLines = @($consumerOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })

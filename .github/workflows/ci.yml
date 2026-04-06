@@ -43,7 +43,7 @@ jobs:
         shell: pwsh
         run: .\scripts\bootstrap-local-secrets.ps1
       - name: Start integration stack
-        run: docker compose up -d db redis kafka backend
+        run: docker compose up -d db redis kafka backend celery-worker
       - name: Run platform integration smoke
         shell: pwsh
         run: .\scripts\platform-integration-smoke.ps1 -SummaryPath artifacts\integration-smoke-summary.json
