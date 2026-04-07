@@ -534,6 +534,8 @@ try {
     Assert-Condition (-not [string]::IsNullOrWhiteSpace($completedTrainingJob.completed_at)) "Retraining prep job never recorded completed_at."
     Assert-Condition ($completedTrainingJob.result_payload.manifest.manifest_id.Length -gt 0) "Retraining prep job manifest is missing."
     Assert-Condition ($completedTrainingJob.result_payload.export_urls.json.Length -gt 0) "Retraining prep job export URLs are missing."
+    Assert-Condition ($null -ne $completedTrainingJob.result_payload.promotion_gate) "Retraining prep job promotion gate is missing."
+    Assert-Condition (($completedTrainingJob.result_payload.promotion_gate.rollback_triggers | Measure-Object).Count -ge 3) "Promotion gate rollback triggers are missing."
     $summary.jobs.retraining_job = [ordered]@{
         id = $completedTrainingJob.id
         status = $completedTrainingJob.status
@@ -542,6 +544,7 @@ try {
         ready_for_training = $completedTrainingJob.result_payload.ready_for_training
         recommendation = $completedTrainingJob.result_payload.recommendation
         manifest_id = $completedTrainingJob.result_payload.manifest.manifest_id
+        promotion_decision = $completedTrainingJob.result_payload.promotion_gate.promotion_decision
     }
 
     $jobSql = Format-SqlLiteral $completedTrainingJob.id

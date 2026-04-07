@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from app.schemas import AnomalyAlert
 from app.services.mlflow_logger import log_retraining_run_metrics
 from app.services.reviewed_alert_evaluation import build_reviewed_alert_evaluation
+from app.services.reviewed_alert_promotion_gate import build_reviewed_alert_promotion_gate
 from app.services.reviewed_alert_readiness import build_reviewed_alert_readiness
 from app.services.retraining_manifest import build_retraining_manifest
 
@@ -40,6 +41,11 @@ def build_reviewed_alert_training_run(
         limit=limit,
         recent_count=recent_count,
     )
+    promotion_gate = build_reviewed_alert_promotion_gate(
+        manifest=manifest,
+        evaluation=evaluation,
+        readiness=readiness,
+    )
 
     run_name = f"retraining-prep-{manifest.fingerprint[:10]}"
     mlflow_run_id = log_retraining_run_metrics(
@@ -58,6 +64,9 @@ def build_reviewed_alert_training_run(
             "mean_score_shift": _drift_delta(readiness.mean_score_shift),
             "station_concentration_shift": _drift_delta(readiness.station_concentration_shift),
         },
+        promotion_decision=promotion_gate.promotion_decision,
+        approve_for_canary=promotion_gate.approve_for_canary,
+        blocker_count=len(promotion_gate.blockers),
     )
 
     return {
@@ -67,6 +76,7 @@ def build_reviewed_alert_training_run(
         "manifest": manifest.model_dump(mode="json"),
         "evaluation": evaluation.model_dump(mode="json"),
         "readiness": readiness.model_dump(mode="json"),
+        "promotion_gate": promotion_gate.model_dump(mode="json"),
         "ready_for_training": readiness.ready_for_training,
         "recommendation": readiness.recommendation,
         "recommended_threshold": evaluation.recommended_threshold,

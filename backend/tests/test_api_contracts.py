@@ -972,6 +972,122 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["station_concentration_shift"]["absolute_delta"], 0.5)
         self.assertGreaterEqual(len(payload["warnings"]), 1)
 
+    async def test_reviewed_alert_promotion_gate_allows_canary_when_dataset_is_stable(self) -> None:
+        now = datetime.now(UTC)
+        stable_alerts: list[AnomalyAlert] = []
+        station_ids = ["mekong-can-tho", "saigon-thu-duc"]
+
+        for index in range(14):
+            station_id = station_ids[index % 2]
+            stable_alerts.append(
+                AnomalyAlert(
+                    id=f"gate-true-{index}",
+                    timestamp=now - timedelta(hours=48 - index),
+                    station_id=station_id,
+                    severity="high" if index % 3 == 0 else "medium",
+                    score=0.74 + ((index % 4) * 0.02),
+                    reasons=["confirmed anomaly"],
+                    feature_contributions={"ph": 1.8},
+                    incident_status="acknowledged",
+                    incident_note="",
+                    incident_updated_at=now - timedelta(hours=47 - index),
+                    review_label="true_anomaly",
+                    review_note="confirmed",
+                    reviewed_at=now - timedelta(days=4, hours=14 - index),
+                    reviewed_by="test-admin",
+                )
+            )
+
+        for index in range(4):
+            station_id = station_ids[index % 2]
+            stable_alerts.append(
+                AnomalyAlert(
+                    id=f"gate-false-base-{index}",
+                    timestamp=now - timedelta(hours=28 - index),
+                    station_id=station_id,
+                    severity="low",
+                    score=0.46 + ((index % 3) * 0.01),
+                    reasons=["operator false positive"],
+                    feature_contributions={"tds": 0.8},
+                    incident_status="acknowledged",
+                    incident_note="",
+                    incident_updated_at=now - timedelta(hours=27 - index),
+                    review_label="false_positive",
+                    review_note="sensor drift",
+                    reviewed_at=now - timedelta(days=3, hours=4 - index),
+                    reviewed_by="test-admin",
+                )
+            )
+        for index in range(4):
+            station_id = station_ids[index % 2]
+            stable_alerts.append(
+                AnomalyAlert(
+                    id=f"gate-true-recent-{index}",
+                    timestamp=now - timedelta(hours=10 - index),
+                    station_id=station_id,
+                    severity="high" if index % 2 == 0 else "medium",
+                    score=0.78 + (index * 0.01),
+                    reasons=["recent confirmed anomaly"],
+                    feature_contributions={"turbidity": 1.9},
+                    incident_status="acknowledged",
+                    incident_note="",
+                    incident_updated_at=now - timedelta(hours=9 - index),
+                    review_label="true_anomaly",
+                    review_note="recent confirmed",
+                    reviewed_at=now - timedelta(hours=10 - index),
+                    reviewed_by="test-admin",
+                )
+            )
+        for index in range(2):
+            station_id = station_ids[(index + 1) % 2]
+            stable_alerts.append(
+                AnomalyAlert(
+                    id=f"gate-false-recent-{index}",
+                    timestamp=now - timedelta(hours=6 - index),
+                    station_id=station_id,
+                    severity="low",
+                    score=0.47 + (index * 0.01),
+                    reasons=["recent false positive"],
+                    feature_contributions={"tds": 0.7},
+                    incident_status="acknowledged",
+                    incident_note="",
+                    incident_updated_at=now - timedelta(hours=5 - index),
+                    review_label="false_positive",
+                    review_note="maintenance",
+                    reviewed_at=now - timedelta(hours=6 - index),
+                    reviewed_by="test-admin",
+                )
+            )
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def reviewed_alerts(
+                self,
+                limit: int,
+                *,
+                label: str | None = None,
+                station_id: str | None = None,
+                since_minutes: int | None = None,
+            ) -> list[AnomalyAlert]:
+                return stable_alerts[:limit]
+
+        with patch.object(alert_routes, "PostgresStore", FakeStore):
+            response = await self.client.get(
+                "/api/alerts/labeled/promotion-gate",
+                params={"since_minutes": 10080, "limit": 100, "recent_count": 6},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["promotion_decision"], "canary")
+        self.assertTrue(payload["approve_for_shadow"])
+        self.assertTrue(payload["approve_for_canary"])
+        self.assertEqual(len(payload["blockers"]), 0)
+        self.assertGreaterEqual(len(payload["rollback_triggers"]), 3)
+        self.assertTrue(any(check["key"] == "precision_floor" and check["passed"] for check in payload["checks"]))
+
     async def test_community_overview_filters_resolved_alerts_and_uses_selected_profile(self) -> None:
         now = datetime.now(UTC)
         stations = [

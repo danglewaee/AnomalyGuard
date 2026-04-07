@@ -119,8 +119,10 @@ Incident workflow endpoints:
   - admin-only offline evaluation summary for reviewed alerts, including current precision, severity breakdown, and score-threshold sweep
 - `GET /api/alerts/labeled/readiness`
   - admin-only retraining readiness and drift summary for reviewed alerts, including recommendation, label-mix drift, score shift, and station concentration shift
+- `GET /api/alerts/labeled/promotion-gate`
+  - admin-only promotion policy for reviewed alerts, including `blocked / shadow / canary`, explicit blockers, required actions, and rollback triggers
 - `POST /api/alerts/labeled/retraining-jobs`
-  - admin-only background job that snapshots the reviewed dataset into a retraining bundle with manifest, readiness, evaluation, suggested split, export URLs, and optional MLflow run metadata
+  - admin-only background job that snapshots the reviewed dataset into a retraining bundle with manifest, readiness, evaluation, promotion gate, suggested split, export URLs, and optional MLflow run metadata
 - `GET /api/alerts/{alert_id}/history`
   - admin-only operator timeline for detection, incident-state changes, and review labels with notes and actors
 

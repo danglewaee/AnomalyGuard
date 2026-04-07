@@ -35,6 +35,13 @@ function formatScore(value) {
   return Number(value).toFixed(3);
 }
 
+function formatDecisionLabel(value) {
+  if (!value) return "-";
+  if (value === "canary") return "Canary";
+  if (value === "shadow") return "Shadow Only";
+  return "Blocked";
+}
+
 function driftSummary(metric, asPercent = false) {
   if (!metric || metric.absolute_delta == null) return "-";
   return asPercent ? `${Math.round(metric.absolute_delta * 100)} pts` : formatScore(metric.absolute_delta);
@@ -82,6 +89,7 @@ function OpsView({
   onExportReviewedAlerts,
   reviewReadiness,
   reviewEvaluation,
+  reviewPromotionGate,
   reviewInsightsBusy,
   reviewInsightsMessage,
   onRefreshReviewInsights,
@@ -334,6 +342,17 @@ function OpsView({
                 <strong>{formatScore(reviewEvaluation.recommended_threshold)}</strong>
                 <div className="muted tiny">Current alert threshold {formatScore(reviewEvaluation.current_alert_threshold)}</div>
               </div>
+              <div className="healthStatCard">
+                <span>Promotion Gate</span>
+                <strong>{formatDecisionLabel(reviewPromotionGate?.promotion_decision)}</strong>
+                <div className={`healthBadge gate-${reviewPromotionGate?.promotion_decision || "blocked"}`}>
+                  {reviewPromotionGate?.approve_for_canary
+                    ? "canary approved"
+                    : reviewPromotionGate?.approve_for_shadow
+                      ? "shadow only"
+                      : "promotion blocked"}
+                </div>
+              </div>
             </div>
 
             <div className="healthGrid">
@@ -426,6 +445,68 @@ function OpsView({
               </div>
             </div>
 
+            {reviewPromotionGate ? (
+              <div className="promotionGatePanel">
+                <div className="sectionTitle">
+                  <div>
+                    <h3>Promotion Gate</h3>
+                    <div className="muted tiny">
+                      Gate the candidate before shadow mode or canary rollout, and keep rollback triggers explicit.
+                    </div>
+                  </div>
+                  <div className={`healthBadge gate-${reviewPromotionGate.promotion_decision}`}>
+                    {formatDecisionLabel(reviewPromotionGate.promotion_decision)}
+                  </div>
+                </div>
+
+                <div className="promotionGateGrid">
+                  <div className="healthCard">
+                    <h3>Gate Checks</h3>
+                    <div className="checkList">
+                      {(reviewPromotionGate.checks || []).map((check) => (
+                        <div
+                          key={check.key}
+                          className={`checkItem ${check.passed ? "passed" : check.severity === "blocker" ? "blocked" : "failed"}`}
+                        >
+                          <div className="checkItemHead">
+                            <strong>{check.key.replaceAll("_", " ")}</strong>
+                            <span>{check.passed ? "pass" : check.severity}</span>
+                          </div>
+                          <div className="muted tiny">{check.detail}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="healthCard">
+                    <h3>Required Actions</h3>
+                    {reviewPromotionGate.required_actions?.length ? (
+                      <div className="warningList">
+                        {reviewPromotionGate.required_actions.map((action) => (
+                          <div key={action} className="warningItem">
+                            {action}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="muted tiny">No blocking actions. Candidate is clear for a narrow canary.</div>
+                    )}
+                  </div>
+
+                  <div className="healthCard">
+                    <h3>Rollback Triggers</h3>
+                    <div className="warningList">
+                      {(reviewPromotionGate.rollback_triggers || []).map((trigger) => (
+                        <div key={trigger} className="warningItem rollbackItem">
+                          {trigger}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {lastRetrainingBundle ? (
               <div className="bundleSummary">
                 <div className="bundleSummaryCard">
@@ -447,6 +528,17 @@ function OpsView({
                   <span>Recommended Threshold</span>
                   <strong>{formatScore(lastRetrainingBundle.recommended_threshold)}</strong>
                   <div className="muted tiny">{lastRetrainingBundle.mlflow_run_id || "No MLflow run id available"}</div>
+                </div>
+                <div className="bundleSummaryCard">
+                  <span>Bundle Gate</span>
+                  <strong>{formatDecisionLabel(lastRetrainingBundle.promotion_gate?.promotion_decision)}</strong>
+                  <div className="muted tiny">
+                    {lastRetrainingBundle.promotion_gate?.approve_for_canary
+                      ? "Approved for canary rollout"
+                      : lastRetrainingBundle.promotion_gate?.approve_for_shadow
+                        ? "Keep in shadow mode"
+                        : `${lastRetrainingBundle.promotion_gate?.blockers?.length || 0} blockers before promotion`}
+                  </div>
                 </div>
               </div>
             ) : null}

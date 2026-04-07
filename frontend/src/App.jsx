@@ -57,6 +57,7 @@ function App() {
   const [historyBusyId, setHistoryBusyId] = useState("");
   const [reviewReadiness, setReviewReadiness] = useState(null);
   const [reviewEvaluation, setReviewEvaluation] = useState(null);
+  const [reviewPromotionGate, setReviewPromotionGate] = useState(null);
   const [reviewInsightsBusy, setReviewInsightsBusy] = useState(false);
   const [reviewInsightsMessage, setReviewInsightsMessage] = useState("Login admin to inspect reviewed dataset quality.");
   const [retrainingJobBusy, setRetrainingJobBusy] = useState(false);
@@ -169,6 +170,7 @@ function App() {
       if (!authToken) {
         setReviewReadiness(null);
         setReviewEvaluation(null);
+        setReviewPromotionGate(null);
         setReviewInsightsMessage("Login admin to inspect reviewed dataset quality.");
         return;
       }
@@ -186,13 +188,15 @@ function App() {
       setReviewInsightsBusy(true);
       try {
         const headers = { Authorization: `Bearer ${authToken}` };
-        const [readinessRes, evaluationRes] = await Promise.all([
+        const [readinessRes, evaluationRes, promotionGateRes] = await Promise.all([
           fetch(`${API_BASE}/api/alerts/labeled/readiness?${readinessParams.toString()}`, { headers }),
           fetch(`${API_BASE}/api/alerts/labeled/evaluation?${baseParams.toString()}`, { headers }),
+          fetch(`${API_BASE}/api/alerts/labeled/promotion-gate?${readinessParams.toString()}`, { headers }),
         ]);
 
         const readinessBody = await readinessRes.json();
         const evaluationBody = await evaluationRes.json();
+        const promotionGateBody = await promotionGateRes.json();
 
         if (!readinessRes.ok) {
           if (!suppressErrors) {
@@ -206,9 +210,16 @@ function App() {
           }
           return;
         }
+        if (!promotionGateRes.ok) {
+          if (!suppressErrors) {
+            setReviewInsightsMessage(promotionGateBody.detail || "Promotion gate failed to load.");
+          }
+          return;
+        }
 
         setReviewReadiness(readinessBody);
         setReviewEvaluation(evaluationBody);
+        setReviewPromotionGate(promotionGateBody);
         if (!silentSuccess) {
           setReviewInsightsMessage("Reviewed dataset health refreshed.");
         }
@@ -239,6 +250,7 @@ function App() {
     if (!authToken) {
       setReviewReadiness(null);
       setReviewEvaluation(null);
+      setReviewPromotionGate(null);
       setReviewInsightsMessage("Login admin to inspect reviewed dataset quality.");
       return;
     }
@@ -845,9 +857,10 @@ function App() {
           await loadReviewInsights(stationId, sinceMinutes, { suppressErrors: true, silentSuccess: true });
           const manifestId = result.manifest?.manifest_id || "training bundle";
           const recommendation = result.recommendation || "hold";
+          const promotionDecision = result.promotion_gate?.promotion_decision || "blocked";
           const mlflowSuffix = result.mlflow_run_id ? ` MLflow ${result.mlflow_run_id}.` : "";
           setRetrainingJobMessage(
-            `Prepared ${manifestId} with recommendation ${recommendation}.${mlflowSuffix}`
+            `Prepared ${manifestId} with recommendation ${recommendation} and promotion gate ${promotionDecision}.${mlflowSuffix}`
           );
           jobFinished = true;
           break;
@@ -972,6 +985,7 @@ function App() {
           onExportReviewedAlerts={runReviewedAlertExport}
           reviewReadiness={reviewReadiness}
           reviewEvaluation={reviewEvaluation}
+          reviewPromotionGate={reviewPromotionGate}
           reviewInsightsBusy={reviewInsightsBusy}
           reviewInsightsMessage={reviewInsightsMessage}
           onRefreshReviewInsights={() => loadReviewInsights(stationId, sinceMinutes, { silentSuccess: false })}

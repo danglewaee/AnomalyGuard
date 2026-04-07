@@ -667,12 +667,27 @@ h3 {
   color: #0c7f53;
 }
 
+.gate-canary {
+  background: #ddf7ea;
+  color: #0c7f53;
+}
+
 .health-monitor {
   background: #fff0db;
   color: #aa6512;
 }
 
+.gate-shadow {
+  background: #fff0db;
+  color: #aa6512;
+}
+
 .health-hold {
+  background: #fde2e2;
+  color: #9a2222;
+}
+
+.gate-blocked {
   background: #fde2e2;
   color: #9a2222;
 }
@@ -706,8 +721,17 @@ h3 {
   border-color: #f1e2cf;
 }
 
+.checkItem.blocked {
+  background: #fff5f5;
+  border-color: #efcfcf;
+}
+
 .checkItem.failed .checkItemHead span {
   color: #aa6512;
+}
+
+.checkItem.blocked .checkItemHead span {
+  color: #9a2222;
 }
 
 .driftGrid {
@@ -745,6 +769,23 @@ h3 {
 
 .bundleActions {
   align-items: center;
+}
+
+.promotionGatePanel {
+  display: grid;
+  gap: 12px;
+}
+
+.promotionGateGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.rollbackItem {
+  background: #f7fafc;
+  border-color: #dfe8f1;
+  color: #38506a;
 }
 
 .bundleExportMessage {
@@ -1120,7 +1161,8 @@ h3 {
   .impactGrid,
   .healthSummaryGrid,
   .healthGrid,
-  .driftGrid {
+  .driftGrid,
+  .promotionGateGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1150,7 +1192,8 @@ h3 {
   .impactGrid,
   .healthSummaryGrid,
   .healthGrid,
-  .driftGrid {
+  .driftGrid,
+  .promotionGateGrid {
     grid-template-columns: 1fr;
   }
 

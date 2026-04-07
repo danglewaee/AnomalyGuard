@@ -154,6 +154,27 @@ class ReviewedAlertReadinessResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class PromotionGateCheck(BaseModel):
+    key: str
+    passed: bool = False
+    severity: Literal["blocker", "warning"] = "warning"
+    detail: str = ""
+
+
+class ReviewedAlertPromotionGateResponse(BaseModel):
+    generated_at: datetime
+    station_id: str | None = None
+    since_minutes: int | None = None
+    promotion_decision: Literal["blocked", "shadow", "canary"] = "blocked"
+    approve_for_shadow: bool = False
+    approve_for_canary: bool = False
+    checks: List[PromotionGateCheck] = Field(default_factory=list)
+    blockers: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    required_actions: List[str] = Field(default_factory=list)
+    rollback_triggers: List[str] = Field(default_factory=list)
+
+
 class RetrainingJobRequest(BaseModel):
     station_id: str | None = None
     since_minutes: int | None = 10080

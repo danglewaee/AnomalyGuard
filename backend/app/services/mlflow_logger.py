@@ -31,6 +31,9 @@ def log_retraining_run_metrics(
     recommended_threshold: float | None,
     label_counts: dict[str, int],
     drift_metrics: dict[str, float | None],
+    promotion_decision: str,
+    approve_for_canary: bool,
+    blocker_count: int,
 ) -> str:
     if mlflow is None:
         return ""
@@ -40,7 +43,10 @@ def log_retraining_run_metrics(
         mlflow.log_param("station_id", station_id or "all")
         mlflow.log_param("since_minutes", since_minutes or 0)
         mlflow.log_param("recommendation", recommendation)
+        mlflow.log_param("promotion_decision", promotion_decision)
+        mlflow.log_param("approve_for_canary", str(approve_for_canary).lower())
         mlflow.log_metric("readiness_score", readiness_score)
+        mlflow.log_metric("promotion_blockers", blocker_count)
         if current_precision is not None:
             mlflow.log_metric("current_precision", current_precision)
         if recommended_threshold is not None:
