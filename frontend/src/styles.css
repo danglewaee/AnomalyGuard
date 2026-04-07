@@ -782,6 +782,38 @@ h3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.registryGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.registryCard {
+  border-radius: 14px;
+  border: 1px solid #e3ebf3;
+  background: #fff;
+  padding: 12px;
+}
+
+.registry-prepared {
+  background: #eef4f8;
+  color: #35506a;
+}
+
+.registry-shadow {
+  background: #fff0db;
+  color: #aa6512;
+}
+
+.registry-canary {
+  background: #ddf7ea;
+  color: #0c7f53;
+}
+
+.registry-rolled_back {
+  background: #fde2e2;
+  color: #9a2222;
+}
+
 .rollbackItem {
   background: #f7fafc;
   border-color: #dfe8f1;

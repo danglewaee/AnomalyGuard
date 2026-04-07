@@ -42,6 +42,20 @@ function formatDecisionLabel(value) {
   return "Blocked";
 }
 
+function formatRegistryStateLabel(value) {
+  if (!value) return "-";
+  if (value === "rolled_back") return "Rolled Back";
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function formatRegistryEventLabel(entry) {
+  if (!entry) return "-";
+  if (!entry.from_state) {
+    return `Registered as ${entry.to_state}`;
+  }
+  return `${entry.from_state} -> ${entry.to_state}`;
+}
+
 function driftSummary(metric, asPercent = false) {
   if (!metric || metric.absolute_delta == null) return "-";
   return asPercent ? `${Math.round(metric.absolute_delta * 100)} pts` : formatScore(metric.absolute_delta);
@@ -96,6 +110,16 @@ function OpsView({
   retrainingJobBusy,
   retrainingJobMessage,
   lastRetrainingBundle,
+  modelRegistryEntries,
+  registryMessage,
+  registryBusyManifest,
+  registryActionNotes,
+  onRegistryNoteChange,
+  onRegistryTransition,
+  registryHistoryByManifest,
+  expandedRegistryManifest,
+  registryHistoryBusyManifest,
+  onToggleRegistryHistory,
   onPrepareRetraining,
   bundleExportBusy,
   bundleExportMessage,
@@ -559,6 +583,121 @@ function OpsView({
                 </div>
               </div>
             ) : null}
+
+            <div className="promotionGatePanel">
+              <div className="sectionTitle">
+                <div>
+                  <h3>Model Registry</h3>
+                  <div className="muted tiny">
+                    Promote prepared candidates into shadow or canary only through explicit state transitions.
+                  </div>
+                  <div className="muted tiny reviewHealthMessage">
+                    {registryMessage || "Registry history tracks who promoted or rolled back each candidate."}
+                  </div>
+                </div>
+              </div>
+
+              {modelRegistryEntries?.length ? (
+                <div className="registryGrid">
+                  {modelRegistryEntries.map((entry) => {
+                    const isBusy = registryBusyManifest === entry.manifest_id;
+                    const isHistoryOpen = expandedRegistryManifest === entry.manifest_id;
+                    const isHistoryBusy = registryHistoryBusyManifest === entry.manifest_id;
+                    const history = registryHistoryByManifest[entry.manifest_id] || [];
+                    const noteValue = registryActionNotes[entry.manifest_id] || "";
+
+                    return (
+                      <div key={entry.manifest_id} className="registryCard">
+                        <div className="alertHead">
+                          <strong>{entry.manifest_id}</strong>
+                          <span className={`healthBadge registry-${entry.state}`}>{formatRegistryStateLabel(entry.state)}</span>
+                        </div>
+                        <div className="incidentMetaRow">
+                          <span className={`healthBadge gate-${entry.promotion_decision}`}>{formatDecisionLabel(entry.promotion_decision)}</span>
+                          <span className="muted tiny">{formatTimestamp(entry.updated_at)}</span>
+                        </div>
+                        <div className="muted tiny">
+                          {entry.reviewed_count} reviewed alerts | readiness {entry.readiness_score} | precision {formatPct(entry.current_precision)}
+                        </div>
+                        <div className="muted tiny">
+                          {entry.approve_for_canary
+                            ? "Approved for canary."
+                            : entry.approve_for_shadow
+                              ? "Approved for shadow only."
+                              : `${entry.blocker_count} blockers remain before promotion.`}
+                        </div>
+                        {entry.status_note ? <div className="historyNote">{entry.status_note}</div> : null}
+                        <div className="noteComposer">
+                          <label className="muted tiny" htmlFor={`registry-note-${entry.manifest_id}`}>
+                            Transition note
+                          </label>
+                          <input
+                            id={`registry-note-${entry.manifest_id}`}
+                            value={noteValue}
+                            onChange={(event) => onRegistryNoteChange(entry.manifest_id, event.target.value)}
+                            placeholder="Add context for promote or rollback"
+                          />
+                        </div>
+                        <div className="incidentActions">
+                          {entry.state === "prepared" ? (
+                            <button
+                              className="inlineButton"
+                              onClick={() => onRegistryTransition(entry.manifest_id, "shadow")}
+                              disabled={isBusy || !entry.approve_for_shadow}
+                            >
+                              {isBusy ? "Updating..." : "Promote To Shadow"}
+                            </button>
+                          ) : null}
+                          {entry.state === "shadow" ? (
+                            <button
+                              className="inlineButton secondary"
+                              onClick={() => onRegistryTransition(entry.manifest_id, "canary")}
+                              disabled={isBusy || !entry.approve_for_canary}
+                            >
+                              {isBusy ? "Updating..." : "Promote To Canary"}
+                            </button>
+                          ) : null}
+                          {entry.state === "shadow" || entry.state === "canary" ? (
+                            <button
+                              className="inlineButton ghost"
+                              onClick={() => onRegistryTransition(entry.manifest_id, "rolled_back")}
+                              disabled={isBusy}
+                            >
+                              {isBusy ? "Updating..." : "Roll Back"}
+                            </button>
+                          ) : null}
+                          <button className="inlineButton ghost" onClick={() => onToggleRegistryHistory(entry.manifest_id)} disabled={isHistoryBusy}>
+                            {isHistoryBusy ? "Loading..." : isHistoryOpen ? "Hide History" : "Show History"}
+                          </button>
+                        </div>
+                        {isHistoryOpen ? (
+                          <div className="historyPanel">
+                            {isHistoryBusy ? (
+                              <div className="muted tiny">Loading candidate timeline...</div>
+                            ) : history.length === 0 ? (
+                              <div className="muted tiny">No registry history recorded for this candidate yet.</div>
+                            ) : (
+                              history.map((event) => (
+                                <div key={`${entry.manifest_id}-history-${event.id}`} className="historyEntry">
+                                  <div className="historyEntryHead">
+                                    <strong className="historyTitle">{formatRegistryEventLabel(event)}</strong>
+                                    <span className="muted tiny">{formatTimestamp(event.created_at)}</span>
+                                  </div>
+                                  <div className="muted tiny">{event.actor || "system"}</div>
+                                  {event.note ? <div className="historyNote">{event.note}</div> : null}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="muted tiny">No candidates are registered yet. Prepare a retraining bundle first.</div>
+              )}
+            </div>
           </>
         )}
       </section>

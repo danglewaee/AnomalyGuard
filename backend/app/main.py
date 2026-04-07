@@ -15,6 +15,7 @@ from app.api.routes.device import router as device_router
 from app.api.routes.ingest import router as ingest_router
 from app.api.routes.incidents import router as incidents_router
 from app.api.routes.jobs import router as jobs_router
+from app.api.routes.model_registry import router as model_registry_router
 from app.config import settings
 from app.db import SessionLocal, engine, get_db
 from app.dependencies import require_admin
@@ -37,6 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(jobs_router)
+app.include_router(model_registry_router)
 app.include_router(community_router)
 app.include_router(incidents_router)
 app.include_router(alerts_router)

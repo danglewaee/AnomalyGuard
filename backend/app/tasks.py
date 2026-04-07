@@ -1,6 +1,7 @@
 from app.db import SessionLocal
 from app.celery_app import celery_app
 from app.services.ingest_pipeline import run_usgs_ingest_pipeline, run_vn_ingest_pipeline
+from app.services.model_registry import register_retraining_candidate
 from app.services.reviewed_alert_training_run import build_reviewed_alert_training_run
 from app.services.store_pg import PostgresStore
 from app.services.usgs_ingest import fetch_usgs_readings
@@ -87,5 +88,15 @@ def prepare_reviewed_alert_training_job_task(
         raise
 
     with SessionLocal() as db:
-        PostgresStore(db).update_job_status(job_id, "succeeded", result_payload=result, error_message="")
+        store = PostgresStore(db)
+        existing_job = store.get_job(job_id)
+        requested_by = existing_job.requested_by if existing_job is not None else "system"
+        registry_entry = register_retraining_candidate(
+            store,
+            job_id=job_id,
+            actor=requested_by,
+            bundle=result,
+        )
+        result["registry_entry"] = registry_entry.model_dump(mode="json")
+        store.update_job_status(job_id, "succeeded", result_payload=result, error_message="")
     return result

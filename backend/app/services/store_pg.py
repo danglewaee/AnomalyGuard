@@ -10,6 +10,8 @@ from app.models import (
     IncidentEventRecord,
     IncidentRecord,
     JobRecord,
+    ModelRegistryEntryRecord,
+    ModelRegistryEventRecord,
     ReadingRecord,
 )
 from app.schemas import (
@@ -17,6 +19,8 @@ from app.schemas import (
     AnomalyAlert,
     DeviceCredentialAuditEntry,
     JobStatus,
+    ModelRegistryEntrySummary,
+    ModelRegistryEventEntry,
     StationProfile,
     WaterReading,
 )
@@ -423,18 +427,180 @@ class PostgresStore:
         ).all()
         return [self._device_credential_event_to_schema(row) for row in rows]
 
+    def upsert_model_registry_entry(
+        self,
+        *,
+        manifest_id: str,
+        job_id: str,
+        promotion_decision: str,
+        approve_for_shadow: bool,
+        approve_for_canary: bool,
+        station_id: str | None,
+        since_minutes: int | None,
+        recommendation: str,
+        readiness_score: int,
+        current_precision: float | None,
+        recommended_threshold: float | None,
+        reviewed_count: int,
+        blocker_count: int,
+        warning_count: int,
+        mlflow_run_id: str,
+        run_name: str,
+        status_note: str,
+        changed_by: str,
+        bundle_payload: dict | None,
+    ) -> ModelRegistryEntrySummary:
+        now = datetime.now(timezone.utc)
+        row = self.db.get(ModelRegistryEntryRecord, manifest_id)
+        if row is None:
+            row = ModelRegistryEntryRecord(
+                manifest_id=manifest_id,
+                job_id=job_id,
+                state="prepared",
+                promotion_decision=promotion_decision,
+                approve_for_shadow=approve_for_shadow,
+                approve_for_canary=approve_for_canary,
+                station_id=station_id or "",
+                since_minutes=since_minutes,
+                recommendation=recommendation,
+                readiness_score=readiness_score,
+                current_precision=current_precision,
+                recommended_threshold=recommended_threshold,
+                reviewed_count=reviewed_count,
+                blocker_count=blocker_count,
+                warning_count=warning_count,
+                mlflow_run_id=mlflow_run_id,
+                run_name=run_name,
+                status_note=status_note,
+                last_changed_by=changed_by,
+                bundle_payload=bundle_payload or {},
+                created_at=now,
+                updated_at=now,
+            )
+            self.db.add(row)
+            self._record_model_registry_event(
+                manifest_id=manifest_id,
+                from_state="",
+                to_state="prepared",
+                actor=changed_by,
+                note=status_note,
+                metadata_payload={
+                    "promotion_decision": promotion_decision,
+                    "approve_for_shadow": approve_for_shadow,
+                    "approve_for_canary": approve_for_canary,
+                    "job_id": job_id,
+                },
+                created_at=now,
+            )
+        else:
+            row.job_id = job_id or row.job_id
+            row.promotion_decision = promotion_decision
+            row.approve_for_shadow = approve_for_shadow
+            row.approve_for_canary = approve_for_canary
+            row.station_id = station_id or ""
+            row.since_minutes = since_minutes
+            row.recommendation = recommendation
+            row.readiness_score = readiness_score
+            row.current_precision = current_precision
+            row.recommended_threshold = recommended_threshold
+            row.reviewed_count = reviewed_count
+            row.blocker_count = blocker_count
+            row.warning_count = warning_count
+            row.mlflow_run_id = mlflow_run_id
+            row.run_name = run_name
+            row.status_note = status_note
+            row.last_changed_by = changed_by
+            row.bundle_payload = bundle_payload or {}
+            row.updated_at = now
+
+        self.db.commit()
+        self.db.refresh(row)
+        return self._model_registry_entry_to_schema(row)
+
+    def get_model_registry_entry(self, manifest_id: str) -> ModelRegistryEntrySummary | None:
+        row = self.db.get(ModelRegistryEntryRecord, manifest_id)
+        if row is None:
+            return None
+        return self._model_registry_entry_to_schema(row)
+
+    def list_model_registry_entries(
+        self,
+        *,
+        limit: int = 20,
+        state: str | None = None,
+    ) -> list[ModelRegistryEntrySummary]:
+        stmt = select(ModelRegistryEntryRecord)
+        if state:
+            stmt = stmt.where(ModelRegistryEntryRecord.state == state)
+        rows = self.db.scalars(
+            stmt.order_by(ModelRegistryEntryRecord.updated_at.desc(), ModelRegistryEntryRecord.created_at.desc()).limit(limit)
+        ).all()
+        return [self._model_registry_entry_to_schema(row) for row in rows]
+
+    def update_model_registry_state(
+        self,
+        *,
+        manifest_id: str,
+        target_state: str,
+        changed_by: str,
+        note: str,
+        metadata_payload: dict | None = None,
+    ) -> ModelRegistryEntrySummary | None:
+        row = self.db.get(ModelRegistryEntryRecord, manifest_id)
+        if row is None:
+            return None
+
+        now = datetime.now(timezone.utc)
+        previous_state = row.state
+        row.state = target_state
+        row.updated_at = now
+        row.last_changed_by = changed_by
+        row.status_note = note
+        if target_state in {"shadow", "canary"}:
+            row.promoted_at = now
+        if target_state == "rolled_back":
+            row.rolled_back_at = now
+
+        self._record_model_registry_event(
+            manifest_id=manifest_id,
+            from_state=previous_state,
+            to_state=target_state,
+            actor=changed_by,
+            note=note,
+            metadata_payload=metadata_payload or {},
+            created_at=now,
+        )
+        self.db.commit()
+        self.db.refresh(row)
+        return self._model_registry_entry_to_schema(row)
+
+    def model_registry_history(self, manifest_id: str, limit: int = 20) -> list[ModelRegistryEventEntry]:
+        stmt = (
+            select(ModelRegistryEventRecord)
+            .where(ModelRegistryEventRecord.manifest_id == manifest_id)
+            .order_by(ModelRegistryEventRecord.created_at.desc(), ModelRegistryEventRecord.id.desc())
+            .limit(limit)
+        )
+        rows = self.db.scalars(stmt).all()
+        rows.reverse()
+        return [self._model_registry_event_to_schema(row) for row in rows]
+
     def counts(self) -> dict[str, int]:
         readings = self.db.scalar(select(func.count()).select_from(ReadingRecord)) or 0
         alerts = self.db.scalar(select(func.count()).select_from(AlertRecord)) or 0
         devices = self.db.scalar(select(func.count()).select_from(DeviceStateRecord)) or 0
         credential_events = self.db.scalar(select(func.count()).select_from(DeviceCredentialEventRecord)) or 0
         jobs = self.db.scalar(select(func.count()).select_from(JobRecord)) or 0
+        model_registry_entries = self.db.scalar(select(func.count()).select_from(ModelRegistryEntryRecord)) or 0
+        model_registry_events = self.db.scalar(select(func.count()).select_from(ModelRegistryEventRecord)) or 0
         return {
             "readings": int(readings),
             "alerts": int(alerts),
             "device_states": int(devices),
             "device_credential_events": int(credential_events),
             "jobs": int(jobs),
+            "model_registry_entries": int(model_registry_entries),
+            "model_registry_events": int(model_registry_events),
         }
 
     def _device_state_to_dict(self, row: DeviceStateRecord) -> dict:
@@ -524,6 +690,69 @@ class PostgresStore:
             event_type=row.event_type,
             actor=row.actor or "",
             key_fingerprint=row.key_fingerprint or "",
+            note=row.note or "",
+            metadata_payload=row.metadata_payload or {},
+            created_at=row.created_at,
+        )
+
+    def _record_model_registry_event(
+        self,
+        *,
+        manifest_id: str,
+        from_state: str,
+        to_state: str,
+        actor: str,
+        note: str,
+        metadata_payload: dict,
+        created_at: datetime,
+    ) -> None:
+        self.db.add(
+            ModelRegistryEventRecord(
+                manifest_id=manifest_id,
+                from_state=from_state,
+                to_state=to_state,
+                actor=actor,
+                note=note,
+                metadata_payload=metadata_payload,
+                created_at=created_at,
+            )
+        )
+
+    def _model_registry_entry_to_schema(self, row: ModelRegistryEntryRecord) -> ModelRegistryEntrySummary:
+        return ModelRegistryEntrySummary(
+            manifest_id=row.manifest_id,
+            job_id=row.job_id or "",
+            state=row.state,
+            promotion_decision=row.promotion_decision,
+            approve_for_shadow=row.approve_for_shadow,
+            approve_for_canary=row.approve_for_canary,
+            station_id=row.station_id or None,
+            since_minutes=row.since_minutes,
+            recommendation=row.recommendation,
+            readiness_score=row.readiness_score,
+            current_precision=row.current_precision,
+            recommended_threshold=row.recommended_threshold,
+            reviewed_count=row.reviewed_count,
+            blocker_count=row.blocker_count,
+            warning_count=row.warning_count,
+            mlflow_run_id=row.mlflow_run_id or "",
+            run_name=row.run_name or "",
+            status_note=row.status_note or "",
+            last_changed_by=row.last_changed_by or "",
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            promoted_at=row.promoted_at,
+            rolled_back_at=row.rolled_back_at,
+            bundle_payload=row.bundle_payload or {},
+        )
+
+    def _model_registry_event_to_schema(self, row: ModelRegistryEventRecord) -> ModelRegistryEventEntry:
+        return ModelRegistryEventEntry(
+            id=row.id,
+            manifest_id=row.manifest_id,
+            from_state=row.from_state or "",
+            to_state=row.to_state,
+            actor=row.actor or "",
             note=row.note or "",
             metadata_payload=row.metadata_payload or {},
             created_at=row.created_at,

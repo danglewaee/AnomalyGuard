@@ -104,3 +104,45 @@ class DeviceCredentialEventRecord(Base):
     note: Mapped[str] = mapped_column(Text, default="")
     metadata_payload: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class ModelRegistryEntryRecord(Base):
+    __tablename__ = "model_registry_entries"
+
+    manifest_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    state: Mapped[str] = mapped_column(String(32), index=True, default="prepared")
+    promotion_decision: Mapped[str] = mapped_column(String(32), index=True, default="blocked")
+    approve_for_shadow: Mapped[bool] = mapped_column(default=False)
+    approve_for_canary: Mapped[bool] = mapped_column(default=False)
+    station_id: Mapped[str] = mapped_column(String(128), index=True, default="")
+    since_minutes: Mapped[int | None] = mapped_column(nullable=True)
+    recommendation: Mapped[str] = mapped_column(String(32), default="hold")
+    readiness_score: Mapped[int] = mapped_column(default=0)
+    current_precision: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recommended_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reviewed_count: Mapped[int] = mapped_column(default=0)
+    blocker_count: Mapped[int] = mapped_column(default=0)
+    warning_count: Mapped[int] = mapped_column(default=0)
+    mlflow_run_id: Mapped[str] = mapped_column(String(128), default="")
+    run_name: Mapped[str] = mapped_column(String(128), default="")
+    status_note: Mapped[str] = mapped_column(Text, default="")
+    last_changed_by: Mapped[str] = mapped_column(String(128), default="")
+    bundle_payload: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ModelRegistryEventRecord(Base):
+    __tablename__ = "model_registry_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    manifest_id: Mapped[str] = mapped_column(String(64), index=True)
+    from_state: Mapped[str] = mapped_column(String(32), default="")
+    to_state: Mapped[str] = mapped_column(String(32), index=True)
+    actor: Mapped[str] = mapped_column(String(128), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    metadata_payload: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

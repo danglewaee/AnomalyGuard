@@ -536,6 +536,7 @@ try {
     Assert-Condition ($completedTrainingJob.result_payload.export_urls.json.Length -gt 0) "Retraining prep job export URLs are missing."
     Assert-Condition ($null -ne $completedTrainingJob.result_payload.promotion_gate) "Retraining prep job promotion gate is missing."
     Assert-Condition (($completedTrainingJob.result_payload.promotion_gate.rollback_triggers | Measure-Object).Count -ge 3) "Promotion gate rollback triggers are missing."
+    Assert-Condition ($null -ne $completedTrainingJob.result_payload.registry_entry) "Retraining prep job registry entry is missing."
     $summary.jobs.retraining_job = [ordered]@{
         id = $completedTrainingJob.id
         status = $completedTrainingJob.status
@@ -545,6 +546,21 @@ try {
         recommendation = $completedTrainingJob.result_payload.recommendation
         manifest_id = $completedTrainingJob.result_payload.manifest.manifest_id
         promotion_decision = $completedTrainingJob.result_payload.promotion_gate.promotion_decision
+        registry_state = $completedTrainingJob.result_payload.registry_entry.state
+    }
+
+    $registryEntry = Invoke-JsonRequest -Method Get -Uri "$baseUrl/api/model-registry?limit=10" -Headers $authHeaders
+    $matchingRegistryEntry = $registryEntry | Where-Object { $_.manifest_id -eq $completedTrainingJob.result_payload.manifest.manifest_id } | Select-Object -First 1
+    Assert-Condition ($null -ne $matchingRegistryEntry) "Model registry list did not return the prepared candidate."
+    Assert-Condition ($matchingRegistryEntry.state -eq "prepared") "Prepared candidate is not in prepared state."
+
+    $registryHistory = Invoke-JsonRequest -Method Get -Uri "$baseUrl/api/model-registry/$($completedTrainingJob.result_payload.manifest.manifest_id)/history?limit=10" -Headers $authHeaders
+    Assert-Condition (($registryHistory | Measure-Object).Count -ge 1) "Model registry history is empty."
+    Assert-Condition ($registryHistory[0].to_state -eq "prepared") "Model registry history did not record candidate registration."
+    $summary.jobs.registry = [ordered]@{
+        manifest_id = $matchingRegistryEntry.manifest_id
+        state = $matchingRegistryEntry.state
+        history_events = ($registryHistory | Measure-Object).Count
     }
 
     $jobSql = Format-SqlLiteral $completedTrainingJob.id

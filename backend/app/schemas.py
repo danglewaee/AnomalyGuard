@@ -175,6 +175,49 @@ class ReviewedAlertPromotionGateResponse(BaseModel):
     rollback_triggers: List[str] = Field(default_factory=list)
 
 
+class ModelRegistryEntrySummary(BaseModel):
+    manifest_id: str
+    job_id: str = ""
+    state: Literal["prepared", "shadow", "canary", "rolled_back"]
+    promotion_decision: Literal["blocked", "shadow", "canary"] = "blocked"
+    approve_for_shadow: bool = False
+    approve_for_canary: bool = False
+    station_id: str | None = None
+    since_minutes: int | None = None
+    recommendation: Literal["hold", "monitor", "ready"] = "hold"
+    readiness_score: int = 0
+    current_precision: float | None = None
+    recommended_threshold: float | None = None
+    reviewed_count: int = 0
+    blocker_count: int = 0
+    warning_count: int = 0
+    mlflow_run_id: str = ""
+    run_name: str = ""
+    status_note: str = ""
+    last_changed_by: str = ""
+    created_at: datetime
+    updated_at: datetime
+    promoted_at: datetime | None = None
+    rolled_back_at: datetime | None = None
+    bundle_payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelRegistryEventEntry(BaseModel):
+    id: int
+    manifest_id: str
+    from_state: str = ""
+    to_state: str
+    actor: str = ""
+    note: str = ""
+    metadata_payload: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ModelRegistryTransitionRequest(BaseModel):
+    target_state: Literal["shadow", "canary", "rolled_back"]
+    note: str = ""
+
+
 class RetrainingJobRequest(BaseModel):
     station_id: str | None = None
     since_minutes: int | None = 10080

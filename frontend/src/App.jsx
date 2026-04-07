@@ -63,6 +63,13 @@ function App() {
   const [retrainingJobBusy, setRetrainingJobBusy] = useState(false);
   const [retrainingJobMessage, setRetrainingJobMessage] = useState("");
   const [lastRetrainingBundle, setLastRetrainingBundle] = useState(null);
+  const [modelRegistryEntries, setModelRegistryEntries] = useState([]);
+  const [registryMessage, setRegistryMessage] = useState("");
+  const [registryBusyManifest, setRegistryBusyManifest] = useState("");
+  const [registryActionNotes, setRegistryActionNotes] = useState({});
+  const [registryHistoryByManifest, setRegistryHistoryByManifest] = useState({});
+  const [expandedRegistryManifest, setExpandedRegistryManifest] = useState("");
+  const [registryHistoryBusyManifest, setRegistryHistoryBusyManifest] = useState("");
   const [bundleExportBusy, setBundleExportBusy] = useState(false);
   const [bundleExportMessage, setBundleExportMessage] = useState("");
 
@@ -234,6 +241,41 @@ function App() {
     [authToken, sinceMinutes, stationId]
   );
 
+  const loadModelRegistry = useCallback(
+    async (options = {}) => {
+      const { suppressErrors = false } = options;
+      if (!authToken) {
+        setModelRegistryEntries([]);
+        setRegistryHistoryByManifest({});
+        setExpandedRegistryManifest("");
+        setRegistryMessage("Login admin to inspect candidate lifecycle.");
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/model-registry?limit=12`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          if (!suppressErrors) {
+            setRegistryMessage(body.detail || "Model registry failed to load.");
+          }
+          return;
+        }
+        setModelRegistryEntries(body);
+        if (!suppressErrors) {
+          setRegistryMessage("Candidate lifecycle refreshed.");
+        }
+      } catch {
+        if (!suppressErrors) {
+          setRegistryMessage("Cannot reach backend for model registry.");
+        }
+      }
+    },
+    [authToken]
+  );
+
   useEffect(() => {
     loadSnapshot(stationId, sinceMinutes);
   }, [loadSnapshot, sinceMinutes, stationId]);
@@ -251,11 +293,17 @@ function App() {
       setReviewReadiness(null);
       setReviewEvaluation(null);
       setReviewPromotionGate(null);
+      setModelRegistryEntries([]);
+      setRegistryHistoryByManifest({});
+      setExpandedRegistryManifest("");
+      setRegistryActionNotes({});
+      setRegistryMessage("Login admin to inspect candidate lifecycle.");
       setReviewInsightsMessage("Login admin to inspect reviewed dataset quality.");
       return;
     }
     loadReviewInsights(stationId, sinceMinutes, { suppressErrors: true, silentSuccess: true });
-  }, [authToken, loadReviewInsights, sinceMinutes, stationId]);
+    loadModelRegistry({ suppressErrors: true });
+  }, [authToken, loadModelRegistry, loadReviewInsights, sinceMinutes, stationId]);
 
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
@@ -323,6 +371,22 @@ function App() {
           setControlDirty(false);
           setDeviceMessage(`Control pushed to ${data.payload.station_name}`);
         }
+      }
+
+      if (data.event === "model_registry_state") {
+        setModelRegistryEntries((previous) => {
+          const next = [data.payload, ...previous.filter((item) => item.manifest_id !== data.payload.manifest_id)];
+          next.sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime());
+          return next.slice(0, 12);
+        });
+        setLastRetrainingBundle((previous) =>
+          previous?.registry_entry?.manifest_id === data.payload.manifest_id
+            ? {
+                ...previous,
+                registry_entry: data.payload,
+              }
+            : previous
+        );
       }
     };
 
@@ -736,6 +800,115 @@ function App() {
     }
   };
 
+  const loadModelRegistryHistory = useCallback(
+    async (manifestId, options = {}) => {
+      const { force = false, suppressErrors = false } = options;
+      if (!authToken) {
+        if (!suppressErrors) {
+          setRegistryMessage("Login admin first to load candidate history.");
+        }
+        return;
+      }
+      if (!force && registryHistoryByManifest[manifestId]) {
+        return;
+      }
+
+      setRegistryHistoryBusyManifest(manifestId);
+      try {
+        const res = await fetch(`${API_BASE}/api/model-registry/${manifestId}/history?limit=25`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          if (!suppressErrors) {
+            setRegistryMessage(body.detail || "Candidate history failed to load.");
+          }
+          return;
+        }
+        setRegistryHistoryByManifest((previous) => ({ ...previous, [manifestId]: body }));
+      } catch {
+        if (!suppressErrors) {
+          setRegistryMessage("Cannot reach backend for candidate history.");
+        }
+      } finally {
+        setRegistryHistoryBusyManifest("");
+      }
+    },
+    [authToken, registryHistoryByManifest]
+  );
+
+  const toggleModelRegistryHistory = useCallback(
+    async (manifestId) => {
+      if (expandedRegistryManifest === manifestId) {
+        setExpandedRegistryManifest("");
+        return;
+      }
+      if (!authToken) {
+        setRegistryMessage("Login admin first to load candidate history.");
+        return;
+      }
+      setExpandedRegistryManifest(manifestId);
+      await loadModelRegistryHistory(manifestId);
+    },
+    [authToken, expandedRegistryManifest, loadModelRegistryHistory]
+  );
+
+  const runModelRegistryTransition = async (manifestId, targetState) => {
+    setRegistryMessage("");
+    if (!authToken) {
+      setRegistryMessage("Login admin first to promote or roll back a candidate.");
+      return;
+    }
+
+    const note = (registryActionNotes[manifestId] || "").trim();
+    setRegistryBusyManifest(manifestId);
+    try {
+      const res = await fetch(`${API_BASE}/api/model-registry/${manifestId}/transition`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ target_state: targetState, note }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setRegistryMessage(body.detail || "Candidate transition failed.");
+        return;
+      }
+
+      setModelRegistryEntries((previous) => {
+        const next = [body, ...previous.filter((item) => item.manifest_id !== manifestId)];
+        next.sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime());
+        return next.slice(0, 12);
+      });
+      if (lastRetrainingBundle?.registry_entry?.manifest_id === manifestId) {
+        setLastRetrainingBundle((previous) =>
+          previous
+            ? {
+                ...previous,
+                registry_entry: body,
+              }
+            : previous
+        );
+      }
+      if (registryHistoryByManifest[manifestId] || expandedRegistryManifest === manifestId) {
+        await loadModelRegistryHistory(manifestId, { force: true, suppressErrors: true });
+      }
+      setRegistryActionNotes((previous) => ({ ...previous, [manifestId]: "" }));
+      const nextCopy = {
+        shadow: "Candidate moved to shadow mode.",
+        canary: "Candidate moved to canary rollout.",
+        rolled_back: "Candidate rolled back.",
+      };
+      setRegistryMessage(nextCopy[targetState] || "Candidate updated.");
+    } catch {
+      setRegistryMessage("Cannot reach backend for candidate transition.");
+    } finally {
+      setRegistryBusyManifest("");
+    }
+  };
+
   const downloadRetrainingBundleJson = useCallback(() => {
     setBundleExportMessage("");
     if (!lastRetrainingBundle) {
@@ -854,6 +1027,7 @@ function App() {
         if (jobBody.status === "succeeded") {
           const result = jobBody.result_payload || {};
           setLastRetrainingBundle(result);
+          await loadModelRegistry({ suppressErrors: true });
           await loadReviewInsights(stationId, sinceMinutes, { suppressErrors: true, silentSuccess: true });
           const manifestId = result.manifest?.manifest_id || "training bundle";
           const recommendation = result.recommendation || "hold";
@@ -992,6 +1166,18 @@ function App() {
           retrainingJobBusy={retrainingJobBusy}
           retrainingJobMessage={retrainingJobMessage}
           lastRetrainingBundle={lastRetrainingBundle}
+          modelRegistryEntries={modelRegistryEntries}
+          registryMessage={registryMessage}
+          registryBusyManifest={registryBusyManifest}
+          registryActionNotes={registryActionNotes}
+          onRegistryNoteChange={(manifestId, note) => {
+            setRegistryActionNotes((previous) => ({ ...previous, [manifestId]: note }));
+          }}
+          onRegistryTransition={runModelRegistryTransition}
+          registryHistoryByManifest={registryHistoryByManifest}
+          expandedRegistryManifest={expandedRegistryManifest}
+          registryHistoryBusyManifest={registryHistoryBusyManifest}
+          onToggleRegistryHistory={toggleModelRegistryHistory}
           onPrepareRetraining={runRetrainingPreparation}
           bundleExportBusy={bundleExportBusy}
           bundleExportMessage={bundleExportMessage}

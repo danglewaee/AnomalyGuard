@@ -29,8 +29,19 @@ from app.api.routes import device as device_routes
 from app.api.routes import ingest as ingest_routes
 from app.api.routes import incidents as incident_routes
 from app.api.routes import jobs as jobs_routes
+from app.api.routes import model_registry as model_registry_routes
 import app.main as main
-from app.schemas import AlertHistoryEntry, AnomalyAlert, DeviceCredentialAuditEntry, DeviceCredentialRotateResponse, JobStatus, StationProfile, WaterReading
+from app.schemas import (
+    AlertHistoryEntry,
+    AnomalyAlert,
+    DeviceCredentialAuditEntry,
+    DeviceCredentialRotateResponse,
+    JobStatus,
+    ModelRegistryEntrySummary,
+    ModelRegistryEventEntry,
+    StationProfile,
+    WaterReading,
+)
 from app.services.auth import get_password_hash
 
 
@@ -1087,6 +1098,168 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(payload["blockers"]), 0)
         self.assertGreaterEqual(len(payload["rollback_triggers"]), 3)
         self.assertTrue(any(check["key"] == "precision_floor" and check["passed"] for check in payload["checks"]))
+
+    async def test_model_registry_list_returns_recent_candidates(self) -> None:
+        now = datetime.now(UTC)
+        entries = [
+            ModelRegistryEntrySummary(
+                manifest_id="labeled-alerts-abc123",
+                job_id="job-1",
+                state="prepared",
+                promotion_decision="blocked",
+                approve_for_shadow=False,
+                approve_for_canary=False,
+                station_id="mekong-can-tho",
+                since_minutes=10080,
+                recommendation="hold",
+                readiness_score=50,
+                current_precision=0.5,
+                recommended_threshold=0.61,
+                reviewed_count=8,
+                blocker_count=2,
+                warning_count=3,
+                mlflow_run_id="",
+                run_name="retraining-prep-abc",
+                status_note="Prepared candidate",
+                last_changed_by="test-admin",
+                created_at=now - timedelta(hours=2),
+                updated_at=now - timedelta(hours=1),
+                bundle_payload={"manifest": {"manifest_id": "labeled-alerts-abc123"}},
+            )
+        ]
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def list_model_registry_entries(self, *, limit: int = 20, state: str | None = None) -> list[ModelRegistryEntrySummary]:
+                return entries[:limit]
+
+        with patch.object(model_registry_routes, "PostgresStore", FakeStore):
+            response = await self.client.get("/api/model-registry", params={"limit": 10})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["manifest_id"], "labeled-alerts-abc123")
+        self.assertEqual(payload[0]["state"], "prepared")
+
+    async def test_model_registry_transition_promotes_shadow_and_broadcasts(self) -> None:
+        now = datetime.now(UTC)
+        current_entry = ModelRegistryEntrySummary(
+            manifest_id="labeled-alerts-shadow",
+            job_id="job-shadow",
+            state="prepared",
+            promotion_decision="shadow",
+            approve_for_shadow=True,
+            approve_for_canary=False,
+            station_id="mekong-can-tho",
+            since_minutes=720,
+            recommendation="monitor",
+            readiness_score=67,
+            current_precision=0.71,
+            recommended_threshold=0.62,
+            reviewed_count=24,
+            blocker_count=0,
+            warning_count=2,
+            mlflow_run_id="mlflow-shadow",
+            run_name="retraining-prep-shadow",
+            status_note="Prepared candidate",
+            last_changed_by="test-admin",
+            created_at=now - timedelta(hours=3),
+            updated_at=now - timedelta(hours=1),
+            bundle_payload={},
+        )
+        updated_entry = current_entry.model_copy(update={"state": "shadow", "updated_at": now, "promoted_at": now, "status_note": "Shadow rollout approved"})
+        broadcast = AsyncMock()
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def get_model_registry_entry(self, manifest_id: str) -> ModelRegistryEntrySummary | None:
+                return current_entry if manifest_id == current_entry.manifest_id else None
+
+            def update_model_registry_state(
+                self,
+                *,
+                manifest_id: str,
+                target_state: str,
+                changed_by: str,
+                note: str,
+                metadata_payload: dict | None = None,
+            ) -> ModelRegistryEntrySummary | None:
+                self.last_update = {
+                    "manifest_id": manifest_id,
+                    "target_state": target_state,
+                    "changed_by": changed_by,
+                    "note": note,
+                    "metadata_payload": metadata_payload or {},
+                }
+                return updated_entry
+
+        with patch.object(model_registry_routes, "PostgresStore", FakeStore), patch.object(
+            model_registry_routes,
+            "broadcast",
+            broadcast,
+        ):
+            response = await self.client.post(
+                f"/api/model-registry/{current_entry.manifest_id}/transition",
+                json={"target_state": "shadow", "note": "Shadow rollout approved"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["state"], "shadow")
+        self.assertEqual(payload["manifest_id"], current_entry.manifest_id)
+        broadcast.assert_awaited_once()
+        self.assertEqual(broadcast.await_args.args[0], "model_registry_state")
+
+    async def test_model_registry_transition_rejects_blocked_candidate(self) -> None:
+        now = datetime.now(UTC)
+        blocked_entry = ModelRegistryEntrySummary(
+            manifest_id="labeled-alerts-blocked",
+            job_id="job-blocked",
+            state="prepared",
+            promotion_decision="blocked",
+            approve_for_shadow=False,
+            approve_for_canary=False,
+            station_id="mekong-can-tho",
+            since_minutes=720,
+            recommendation="hold",
+            readiness_score=34,
+            current_precision=0.4,
+            recommended_threshold=0.58,
+            reviewed_count=8,
+            blocker_count=3,
+            warning_count=4,
+            mlflow_run_id="",
+            run_name="retraining-prep-blocked",
+            status_note="Blocked candidate",
+            last_changed_by="test-admin",
+            created_at=now - timedelta(hours=4),
+            updated_at=now - timedelta(hours=1),
+            bundle_payload={},
+        )
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def get_model_registry_entry(self, manifest_id: str) -> ModelRegistryEntrySummary | None:
+                return blocked_entry if manifest_id == blocked_entry.manifest_id else None
+
+            def update_model_registry_state(self, **kwargs: object) -> ModelRegistryEntrySummary | None:
+                raise AssertionError("Blocked candidate should not update state")
+
+        with patch.object(model_registry_routes, "PostgresStore", FakeStore):
+            response = await self.client.post(
+                f"/api/model-registry/{blocked_entry.manifest_id}/transition",
+                json={"target_state": "shadow", "note": "Try promote"},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("does not approve", response.json()["detail"])
 
     async def test_community_overview_filters_resolved_alerts_and_uses_selected_profile(self) -> None:
         now = datetime.now(UTC)
