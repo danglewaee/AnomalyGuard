@@ -22,22 +22,22 @@ def model_registry_entries(
     return [entry.model_dump(mode="json") for entry in list_registry_entries(PostgresStore(db), limit=limit, state=state)]
 
 
-@router.get("/api/model-registry/{manifest_id}/history", response_model=list[ModelRegistryEventEntry])
+@router.get("/api/model-registry/{entry_id}/history", response_model=list[ModelRegistryEventEntry])
 def model_registry_history(
-    manifest_id: str,
+    entry_id: str,
     limit: int = Query(default=25, ge=1, le=200),
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
 ) -> list[dict]:
     store = PostgresStore(db)
-    if store.get_model_registry_entry(manifest_id) is None:
+    if store.get_model_registry_entry(entry_id) is None:
         raise HTTPException(status_code=404, detail="Model registry entry not found")
-    return [entry.model_dump(mode="json") for entry in get_registry_history(store, manifest_id=manifest_id, limit=limit)]
+    return [entry.model_dump(mode="json") for entry in get_registry_history(store, entry_id=entry_id, limit=limit)]
 
 
-@router.post("/api/model-registry/{manifest_id}/transition", response_model=ModelRegistryEntrySummary)
+@router.post("/api/model-registry/{entry_id}/transition", response_model=ModelRegistryEntrySummary)
 async def transition_model_registry_state(
-    manifest_id: str,
+    entry_id: str,
     payload: ModelRegistryTransitionRequest,
     db: Session = Depends(get_db),
     user: dict = Depends(require_admin),
@@ -45,7 +45,7 @@ async def transition_model_registry_state(
     try:
         updated = transition_registry_entry(
             PostgresStore(db),
-            manifest_id=manifest_id,
+            entry_id=entry_id,
             target_state=payload.target_state,
             actor=user.get("sub", "admin"),
             note=payload.note,

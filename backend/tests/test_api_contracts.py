@@ -1103,8 +1103,13 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         now = datetime.now(UTC)
         entries = [
             ModelRegistryEntrySummary(
+                candidate_id="anomalyguard-anomaly-detector-r1000-abc123",
                 manifest_id="labeled-alerts-abc123",
                 job_id="job-1",
+                artifact_key="anomalyguard-anomaly-detector",
+                artifact_version="r1000-abc123",
+                source_revision="r1000",
+                artifact_uri="mlflow://runs/mlflow-abc123",
                 state="prepared",
                 promotion_decision="blocked",
                 approve_for_shadow=False,
@@ -1141,14 +1146,20 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["candidate_id"], "anomalyguard-anomaly-detector-r1000-abc123")
         self.assertEqual(payload[0]["manifest_id"], "labeled-alerts-abc123")
         self.assertEqual(payload[0]["state"], "prepared")
 
     async def test_model_registry_transition_promotes_shadow_and_broadcasts(self) -> None:
         now = datetime.now(UTC)
         current_entry = ModelRegistryEntrySummary(
+            candidate_id="anomalyguard-anomaly-detector-r1000-shadow",
             manifest_id="labeled-alerts-shadow",
             job_id="job-shadow",
+            artifact_key="anomalyguard-anomaly-detector",
+            artifact_version="r1000-shadow",
+            source_revision="r1000",
+            artifact_uri="mlflow://runs/mlflow-shadow",
             state="prepared",
             promotion_decision="shadow",
             approve_for_shadow=True,
@@ -1178,7 +1189,7 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
                 self.db = db
 
             def get_model_registry_entry(self, manifest_id: str) -> ModelRegistryEntrySummary | None:
-                return current_entry if manifest_id == current_entry.manifest_id else None
+                return current_entry if manifest_id in {current_entry.manifest_id, current_entry.candidate_id} else None
 
             def update_model_registry_state(
                 self,
@@ -1204,13 +1215,14 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
             broadcast,
         ):
             response = await self.client.post(
-                f"/api/model-registry/{current_entry.manifest_id}/transition",
+                f"/api/model-registry/{current_entry.candidate_id}/transition",
                 json={"target_state": "shadow", "note": "Shadow rollout approved"},
             )
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["state"], "shadow")
+        self.assertEqual(payload["candidate_id"], current_entry.candidate_id)
         self.assertEqual(payload["manifest_id"], current_entry.manifest_id)
         broadcast.assert_awaited_once()
         self.assertEqual(broadcast.await_args.args[0], "model_registry_state")
@@ -1218,8 +1230,13 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
     async def test_model_registry_transition_rejects_blocked_candidate(self) -> None:
         now = datetime.now(UTC)
         blocked_entry = ModelRegistryEntrySummary(
+            candidate_id="anomalyguard-anomaly-detector-r1000-blocked",
             manifest_id="labeled-alerts-blocked",
             job_id="job-blocked",
+            artifact_key="anomalyguard-anomaly-detector",
+            artifact_version="r1000-blocked",
+            source_revision="r1000",
+            artifact_uri="mlflow://runs/mlflow-blocked",
             state="prepared",
             promotion_decision="blocked",
             approve_for_shadow=False,
@@ -1247,14 +1264,14 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
                 self.db = db
 
             def get_model_registry_entry(self, manifest_id: str) -> ModelRegistryEntrySummary | None:
-                return blocked_entry if manifest_id == blocked_entry.manifest_id else None
+                return blocked_entry if manifest_id in {blocked_entry.manifest_id, blocked_entry.candidate_id} else None
 
             def update_model_registry_state(self, **kwargs: object) -> ModelRegistryEntrySummary | None:
                 raise AssertionError("Blocked candidate should not update state")
 
         with patch.object(model_registry_routes, "PostgresStore", FakeStore):
             response = await self.client.post(
-                f"/api/model-registry/{blocked_entry.manifest_id}/transition",
+                f"/api/model-registry/{blocked_entry.candidate_id}/transition",
                 json={"target_state": "shadow", "note": "Try promote"},
             )
 

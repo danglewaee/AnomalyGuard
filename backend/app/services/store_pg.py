@@ -430,8 +430,13 @@ class PostgresStore:
     def upsert_model_registry_entry(
         self,
         *,
+        candidate_id: str,
         manifest_id: str,
         job_id: str,
+        artifact_key: str,
+        artifact_version: str,
+        source_revision: str,
+        artifact_uri: str,
         promotion_decision: str,
         approve_for_shadow: bool,
         approve_for_canary: bool,
@@ -451,11 +456,16 @@ class PostgresStore:
         bundle_payload: dict | None,
     ) -> ModelRegistryEntrySummary:
         now = datetime.now(timezone.utc)
-        row = self.db.get(ModelRegistryEntryRecord, manifest_id)
+        row = self.db.get(ModelRegistryEntryRecord, candidate_id)
         if row is None:
             row = ModelRegistryEntryRecord(
+                candidate_id=candidate_id,
                 manifest_id=manifest_id,
                 job_id=job_id,
+                artifact_key=artifact_key,
+                artifact_version=artifact_version,
+                source_revision=source_revision,
+                artifact_uri=artifact_uri,
                 state="prepared",
                 promotion_decision=promotion_decision,
                 approve_for_shadow=approve_for_shadow,
@@ -479,12 +489,18 @@ class PostgresStore:
             )
             self.db.add(row)
             self._record_model_registry_event(
+                candidate_id=candidate_id,
                 manifest_id=manifest_id,
                 from_state="",
                 to_state="prepared",
                 actor=changed_by,
                 note=status_note,
                 metadata_payload={
+                    "candidate_id": candidate_id,
+                    "artifact_key": artifact_key,
+                    "artifact_version": artifact_version,
+                    "source_revision": source_revision,
+                    "artifact_uri": artifact_uri,
                     "promotion_decision": promotion_decision,
                     "approve_for_shadow": approve_for_shadow,
                     "approve_for_canary": approve_for_canary,
@@ -493,7 +509,13 @@ class PostgresStore:
                 created_at=now,
             )
         else:
+            row.candidate_id = candidate_id
+            row.manifest_id = manifest_id
             row.job_id = job_id or row.job_id
+            row.artifact_key = artifact_key
+            row.artifact_version = artifact_version
+            row.source_revision = source_revision
+            row.artifact_uri = artifact_uri
             row.promotion_decision = promotion_decision
             row.approve_for_shadow = approve_for_shadow
             row.approve_for_canary = approve_for_canary
@@ -518,7 +540,7 @@ class PostgresStore:
         return self._model_registry_entry_to_schema(row)
 
     def get_model_registry_entry(self, manifest_id: str) -> ModelRegistryEntrySummary | None:
-        row = self.db.get(ModelRegistryEntryRecord, manifest_id)
+        row = self._resolve_model_registry_entry_row(manifest_id)
         if row is None:
             return None
         return self._model_registry_entry_to_schema(row)
@@ -546,7 +568,7 @@ class PostgresStore:
         note: str,
         metadata_payload: dict | None = None,
     ) -> ModelRegistryEntrySummary | None:
-        row = self.db.get(ModelRegistryEntryRecord, manifest_id)
+        row = self._resolve_model_registry_entry_row(manifest_id)
         if row is None:
             return None
 
@@ -562,7 +584,8 @@ class PostgresStore:
             row.rolled_back_at = now
 
         self._record_model_registry_event(
-            manifest_id=manifest_id,
+            candidate_id=row.candidate_id,
+            manifest_id=row.manifest_id,
             from_state=previous_state,
             to_state=target_state,
             actor=changed_by,
@@ -575,9 +598,12 @@ class PostgresStore:
         return self._model_registry_entry_to_schema(row)
 
     def model_registry_history(self, manifest_id: str, limit: int = 20) -> list[ModelRegistryEventEntry]:
+        row = self._resolve_model_registry_entry_row(manifest_id)
+        if row is None:
+            return []
         stmt = (
             select(ModelRegistryEventRecord)
-            .where(ModelRegistryEventRecord.manifest_id == manifest_id)
+            .where(ModelRegistryEventRecord.candidate_id == row.candidate_id)
             .order_by(ModelRegistryEventRecord.created_at.desc(), ModelRegistryEventRecord.id.desc())
             .limit(limit)
         )
@@ -602,6 +628,19 @@ class PostgresStore:
             "model_registry_entries": int(model_registry_entries),
             "model_registry_events": int(model_registry_events),
         }
+
+    def _resolve_model_registry_entry_row(self, entry_id: str) -> ModelRegistryEntryRecord | None:
+        row = self.db.get(ModelRegistryEntryRecord, entry_id)
+        if row is not None:
+            return row
+
+        stmt = (
+            select(ModelRegistryEntryRecord)
+            .where(ModelRegistryEntryRecord.manifest_id == entry_id)
+            .order_by(ModelRegistryEntryRecord.updated_at.desc(), ModelRegistryEntryRecord.created_at.desc())
+            .limit(1)
+        )
+        return self.db.scalars(stmt).first()
 
     def _device_state_to_dict(self, row: DeviceStateRecord) -> dict:
         return {
@@ -698,6 +737,7 @@ class PostgresStore:
     def _record_model_registry_event(
         self,
         *,
+        candidate_id: str,
         manifest_id: str,
         from_state: str,
         to_state: str,
@@ -708,6 +748,7 @@ class PostgresStore:
     ) -> None:
         self.db.add(
             ModelRegistryEventRecord(
+                candidate_id=candidate_id,
                 manifest_id=manifest_id,
                 from_state=from_state,
                 to_state=to_state,
@@ -720,8 +761,13 @@ class PostgresStore:
 
     def _model_registry_entry_to_schema(self, row: ModelRegistryEntryRecord) -> ModelRegistryEntrySummary:
         return ModelRegistryEntrySummary(
+            candidate_id=row.candidate_id,
             manifest_id=row.manifest_id,
             job_id=row.job_id or "",
+            artifact_key=row.artifact_key or "",
+            artifact_version=row.artifact_version or "",
+            source_revision=row.source_revision or "",
+            artifact_uri=row.artifact_uri or "",
             state=row.state,
             promotion_decision=row.promotion_decision,
             approve_for_shadow=row.approve_for_shadow,
@@ -749,6 +795,7 @@ class PostgresStore:
     def _model_registry_event_to_schema(self, row: ModelRegistryEventRecord) -> ModelRegistryEventEntry:
         return ModelRegistryEventEntry(
             id=row.id,
+            candidate_id=row.candidate_id or "",
             manifest_id=row.manifest_id,
             from_state=row.from_state or "",
             to_state=row.to_state,

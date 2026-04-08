@@ -17,6 +17,10 @@ function normalizeRoute(pathname) {
   return pathname.startsWith(COMMUNITY_PATH) ? COMMUNITY_PATH : OPS_PATH;
 }
 
+function getRegistryEntryId(entry) {
+  return entry?.candidate_id || entry?.manifest_id || "";
+}
+
 function App() {
   const [route, setRoute] = useState(() => normalizeRoute(currentPathname()));
 
@@ -374,13 +378,14 @@ function App() {
       }
 
       if (data.event === "model_registry_state") {
+        const entryId = getRegistryEntryId(data.payload);
         setModelRegistryEntries((previous) => {
-          const next = [data.payload, ...previous.filter((item) => item.manifest_id !== data.payload.manifest_id)];
+          const next = [data.payload, ...previous.filter((item) => getRegistryEntryId(item) !== entryId)];
           next.sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime());
           return next.slice(0, 12);
         });
         setLastRetrainingBundle((previous) =>
-          previous?.registry_entry?.manifest_id === data.payload.manifest_id
+          getRegistryEntryId(previous?.registry_entry) === entryId
             ? {
                 ...previous,
                 registry_entry: data.payload,
@@ -801,7 +806,7 @@ function App() {
   };
 
   const loadModelRegistryHistory = useCallback(
-    async (manifestId, options = {}) => {
+    async (entryId, options = {}) => {
       const { force = false, suppressErrors = false } = options;
       if (!authToken) {
         if (!suppressErrors) {
@@ -809,13 +814,13 @@ function App() {
         }
         return;
       }
-      if (!force && registryHistoryByManifest[manifestId]) {
+      if (!force && registryHistoryByManifest[entryId]) {
         return;
       }
 
-      setRegistryHistoryBusyManifest(manifestId);
+      setRegistryHistoryBusyManifest(entryId);
       try {
-        const res = await fetch(`${API_BASE}/api/model-registry/${manifestId}/history?limit=25`, {
+        const res = await fetch(`${API_BASE}/api/model-registry/${entryId}/history?limit=25`, {
           headers: { Authorization: `Bearer ${authToken}` },
         });
         const body = await res.json();
@@ -825,7 +830,7 @@ function App() {
           }
           return;
         }
-        setRegistryHistoryByManifest((previous) => ({ ...previous, [manifestId]: body }));
+        setRegistryHistoryByManifest((previous) => ({ ...previous, [entryId]: body }));
       } catch {
         if (!suppressErrors) {
           setRegistryMessage("Cannot reach backend for candidate history.");
@@ -838,8 +843,8 @@ function App() {
   );
 
   const toggleModelRegistryHistory = useCallback(
-    async (manifestId) => {
-      if (expandedRegistryManifest === manifestId) {
+    async (entryId) => {
+      if (expandedRegistryManifest === entryId) {
         setExpandedRegistryManifest("");
         return;
       }
@@ -847,23 +852,23 @@ function App() {
         setRegistryMessage("Login admin first to load candidate history.");
         return;
       }
-      setExpandedRegistryManifest(manifestId);
-      await loadModelRegistryHistory(manifestId);
+      setExpandedRegistryManifest(entryId);
+      await loadModelRegistryHistory(entryId);
     },
     [authToken, expandedRegistryManifest, loadModelRegistryHistory]
   );
 
-  const runModelRegistryTransition = async (manifestId, targetState) => {
+  const runModelRegistryTransition = async (entryId, targetState) => {
     setRegistryMessage("");
     if (!authToken) {
       setRegistryMessage("Login admin first to promote or roll back a candidate.");
       return;
     }
 
-    const note = (registryActionNotes[manifestId] || "").trim();
-    setRegistryBusyManifest(manifestId);
+    const note = (registryActionNotes[entryId] || "").trim();
+    setRegistryBusyManifest(entryId);
     try {
-      const res = await fetch(`${API_BASE}/api/model-registry/${manifestId}/transition`, {
+      const res = await fetch(`${API_BASE}/api/model-registry/${entryId}/transition`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${authToken}`,
@@ -878,11 +883,11 @@ function App() {
       }
 
       setModelRegistryEntries((previous) => {
-        const next = [body, ...previous.filter((item) => item.manifest_id !== manifestId)];
+        const next = [body, ...previous.filter((item) => getRegistryEntryId(item) !== entryId)];
         next.sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime());
         return next.slice(0, 12);
       });
-      if (lastRetrainingBundle?.registry_entry?.manifest_id === manifestId) {
+      if (getRegistryEntryId(lastRetrainingBundle?.registry_entry) === entryId) {
         setLastRetrainingBundle((previous) =>
           previous
             ? {
@@ -892,10 +897,10 @@ function App() {
             : previous
         );
       }
-      if (registryHistoryByManifest[manifestId] || expandedRegistryManifest === manifestId) {
-        await loadModelRegistryHistory(manifestId, { force: true, suppressErrors: true });
+      if (registryHistoryByManifest[entryId] || expandedRegistryManifest === entryId) {
+        await loadModelRegistryHistory(entryId, { force: true, suppressErrors: true });
       }
-      setRegistryActionNotes((previous) => ({ ...previous, [manifestId]: "" }));
+      setRegistryActionNotes((previous) => ({ ...previous, [entryId]: "" }));
       const nextCopy = {
         shadow: "Candidate moved to shadow mode.",
         canary: "Candidate moved to canary rollout.",

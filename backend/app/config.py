@@ -20,6 +20,7 @@ class Settings(BaseSettings):
         env_file=(".env", "backend/.env", ".env.example", "backend/.env.example"),
         env_file_encoding="utf-8",
         extra="ignore",
+        protected_namespaces=("settings_",),
     )
 
     app_name: str = "AnomalyGuard Water API"
@@ -51,6 +52,8 @@ class Settings(BaseSettings):
     enable_kafka_publish: bool = False
 
     mlflow_tracking_uri: str = "file:./mlruns"
+    model_artifact_key: str = "anomalyguard-anomaly-detector"
+    model_source_revision: str = ""
     community_impact_profile_path: str = ""
 
     @field_validator("device_keys_path", "jwt_secret_key_file", "admin_password_file", "device_api_key_file")

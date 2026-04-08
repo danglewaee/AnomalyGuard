@@ -2,6 +2,7 @@ from app.schemas import (
     ModelRegistryEntrySummary,
     ModelRegistryEventEntry,
 )
+from app.services.model_artifacts import read_model_artifact_descriptor
 from app.services.store_pg import PostgresStore
 
 
@@ -21,17 +22,24 @@ def register_retraining_candidate(
     bundle: dict,
 ) -> ModelRegistryEntrySummary:
     manifest = bundle.get("manifest") or {}
+    model_artifact = read_model_artifact_descriptor(bundle)
     promotion_gate = bundle.get("promotion_gate") or {}
     readiness = bundle.get("readiness") or {}
     evaluation = bundle.get("evaluation") or {}
 
-    manifest_id = str(manifest.get("manifest_id") or "").strip()
-    if not manifest_id:
+    if not model_artifact.manifest_id:
         raise ValueError("Retraining bundle is missing manifest_id.")
+    if not model_artifact.candidate_id:
+        raise ValueError("Retraining bundle is missing candidate_id.")
 
     return store.upsert_model_registry_entry(
-        manifest_id=manifest_id,
+        candidate_id=model_artifact.candidate_id,
+        manifest_id=model_artifact.manifest_id,
         job_id=job_id,
+        artifact_key=model_artifact.artifact_key,
+        artifact_version=model_artifact.artifact_version,
+        source_revision=model_artifact.source_revision,
+        artifact_uri=model_artifact.artifact_uri,
         promotion_decision=str(promotion_gate.get("promotion_decision") or "blocked"),
         approve_for_shadow=bool(promotion_gate.get("approve_for_shadow")),
         approve_for_canary=bool(promotion_gate.get("approve_for_canary")),
@@ -48,7 +56,10 @@ def register_retraining_candidate(
         run_name=str(bundle.get("run_name") or ""),
         status_note=str(
             bundle.get("ingest_note")
-            or f"Prepared candidate {manifest_id} with promotion gate {promotion_gate.get('promotion_decision') or 'blocked'}."
+            or (
+                f"Prepared candidate {model_artifact.candidate_id} from dataset {model_artifact.manifest_id} "
+                f"with promotion gate {promotion_gate.get('promotion_decision') or 'blocked'}."
+            )
         ),
         changed_by=actor,
         bundle_payload=bundle,
@@ -67,21 +78,21 @@ def list_registry_entries(
 def get_registry_history(
     store: PostgresStore,
     *,
-    manifest_id: str,
+    entry_id: str,
     limit: int,
 ) -> list[ModelRegistryEventEntry]:
-    return store.model_registry_history(manifest_id, limit=limit)
+    return store.model_registry_history(entry_id, limit=limit)
 
 
 def transition_registry_entry(
     store: PostgresStore,
     *,
-    manifest_id: str,
+    entry_id: str,
     target_state: str,
     actor: str,
     note: str,
 ) -> ModelRegistryEntrySummary:
-    entry = store.get_model_registry_entry(manifest_id)
+    entry = store.get_model_registry_entry(entry_id)
     if entry is None:
         raise LookupError("Model registry entry not found.")
 
@@ -104,11 +115,15 @@ def transition_registry_entry(
             transition_note = "Promoted to canary rollout."
 
     updated = store.update_model_registry_state(
-        manifest_id=manifest_id,
+        manifest_id=entry_id,
         target_state=target_state,
         changed_by=actor,
         note=transition_note,
         metadata_payload={
+            "candidate_id": entry.candidate_id,
+            "artifact_key": entry.artifact_key,
+            "artifact_version": entry.artifact_version,
+            "source_revision": entry.source_revision,
             "promotion_decision": entry.promotion_decision,
             "approve_for_shadow": entry.approve_for_shadow,
             "approve_for_canary": entry.approve_for_canary,

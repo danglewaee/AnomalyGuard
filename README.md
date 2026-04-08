@@ -124,10 +124,10 @@ Incident workflow endpoints:
 - `POST /api/alerts/labeled/retraining-jobs`
   - admin-only background job that snapshots the reviewed dataset into a retraining bundle with manifest, readiness, evaluation, promotion gate, suggested split, export URLs, and optional MLflow run metadata
 - `GET /api/model-registry`
-  - admin-only list of prepared/shadow/canary/rolled-back candidates with gate snapshot and rollout state
-- `GET /api/model-registry/{manifest_id}/history`
-  - admin-only lifecycle audit trail for a candidate
-- `POST /api/model-registry/{manifest_id}/transition`
+  - admin-only list of prepared/shadow/canary/rolled-back candidates with artifact identity, gate snapshot, and rollout state
+- `GET /api/model-registry/{candidate_id}/history`
+  - admin-only lifecycle audit trail for a candidate; the path also accepts a legacy `manifest_id` and resolves the latest matching candidate
+- `POST /api/model-registry/{candidate_id}/transition`
   - admin-only state transition endpoint for `prepared -> shadow -> canary -> rolled_back`, enforcing promotion-gate rules
 - `GET /api/alerts/{alert_id}/history`
   - admin-only operator timeline for detection, incident-state changes, and review labels with notes and actors
@@ -260,6 +260,8 @@ FAANG-grade platform planning docs:
 ## Model Registry
 
 - Reviewed-alert bundles now register a candidate in the model registry as soon as the retraining prep job succeeds
+- Each registry entry is tied to a `model_artifact` descriptor with `candidate_id`, `artifact_key`, `artifact_version`, `source_revision`, and `artifact_uri`
+- `manifest_id` remains the reviewed-dataset provenance key; rollout state now follows the artifact version rather than collapsing everything into one dataset fingerprint
 - Candidates move through `prepared`, `shadow`, `canary`, and `rolled_back`
 - Promotion gate decisions (`blocked`, `shadow`, `canary`) are snapshot into the registry entry and logged to MLflow
 - Each state change writes an audit event with actor, note, and transition metadata

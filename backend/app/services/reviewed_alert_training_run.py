@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from app.schemas import AnomalyAlert
 from app.services.mlflow_logger import log_retraining_run_metrics
+from app.services.model_artifacts import build_model_artifact_descriptor
 from app.services.reviewed_alert_evaluation import build_reviewed_alert_evaluation
 from app.services.reviewed_alert_promotion_gate import build_reviewed_alert_promotion_gate
 from app.services.reviewed_alert_readiness import build_reviewed_alert_readiness
@@ -48,9 +49,18 @@ def build_reviewed_alert_training_run(
     )
 
     run_name = f"retraining-prep-{manifest.fingerprint[:10]}"
+    model_artifact = build_model_artifact_descriptor(
+        manifest=manifest,
+        mlflow_run_id="",
+        run_name=run_name,
+    )
     mlflow_run_id = log_retraining_run_metrics(
         run_name=run_name,
         manifest_id=manifest.manifest_id,
+        candidate_id=model_artifact.candidate_id,
+        artifact_key=model_artifact.artifact_key,
+        artifact_version=model_artifact.artifact_version,
+        source_revision=model_artifact.source_revision,
         station_id=station_id,
         since_minutes=since_minutes,
         readiness_score=readiness.readiness_score,
@@ -68,12 +78,18 @@ def build_reviewed_alert_training_run(
         approve_for_canary=promotion_gate.approve_for_canary,
         blocker_count=len(promotion_gate.blockers),
     )
+    model_artifact = build_model_artifact_descriptor(
+        manifest=manifest,
+        mlflow_run_id=mlflow_run_id,
+        run_name=run_name,
+    )
 
     return {
         "prepared_at": datetime.now(timezone.utc).isoformat(),
         "run_name": run_name,
         "mlflow_run_id": mlflow_run_id,
         "manifest": manifest.model_dump(mode="json"),
+        "model_artifact": model_artifact.model_dump(mode="json"),
         "evaluation": evaluation.model_dump(mode="json"),
         "readiness": readiness.model_dump(mode="json"),
         "promotion_gate": promotion_gate.model_dump(mode="json"),

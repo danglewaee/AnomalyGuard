@@ -116,9 +116,19 @@ class TaskWorkflowTests(unittest.TestCase):
         bundle = {
             "manifest": {
                 "manifest_id": "labeled-alerts-xyz789",
+                "fingerprint": "xyz789xyz789xyz789",
                 "count": 14,
                 "station_id": "station-demo",
                 "since_minutes": 180,
+            },
+            "model_artifact": {
+                "candidate_id": "anomalyguard-anomaly-detector-r1000-xyz789xyz789",
+                "artifact_key": "anomalyguard-anomaly-detector",
+                "artifact_version": "r1000-xyz789xyz789",
+                "source_revision": "r1000",
+                "artifact_uri": "mlflow://runs/mlflow-retraining",
+                "manifest_id": "labeled-alerts-xyz789",
+                "manifest_fingerprint": "xyz789xyz789xyz789",
             },
             "promotion_gate": {
                 "promotion_decision": "shadow",
@@ -131,8 +141,13 @@ class TaskWorkflowTests(unittest.TestCase):
             "evaluation": {"current_precision": 0.91, "recommended_threshold": 0.77},
         }
         registry_entry = ModelRegistryEntrySummary(
+            candidate_id="anomalyguard-anomaly-detector-r1000-xyz789xyz789",
             manifest_id="labeled-alerts-xyz789",
             job_id="job-retraining",
+            artifact_key="anomalyguard-anomaly-detector",
+            artifact_version="r1000-xyz789xyz789",
+            source_revision="r1000",
+            artifact_uri="mlflow://runs/mlflow-retraining",
             state="prepared",
             promotion_decision="shadow",
             approve_for_shadow=True,
@@ -175,6 +190,7 @@ class TaskWorkflowTests(unittest.TestCase):
         register_candidate.assert_called_once()
         self.assertEqual(register_candidate.call_args.kwargs["job_id"], "job-retraining")
         self.assertEqual(register_candidate.call_args.kwargs["actor"], "ops-admin")
+        self.assertEqual(result["registry_entry"]["candidate_id"], "anomalyguard-anomaly-detector-r1000-xyz789xyz789")
         self.assertEqual(result["registry_entry"]["manifest_id"], "labeled-alerts-xyz789")
         self.assertEqual(_FakeStore.job_updates[-1]["status"], "succeeded")
         self.assertIn("registry_entry", _FakeStore.job_updates[-1]["result_payload"])

@@ -78,6 +78,16 @@ class RetrainingManifestResponse(BaseModel):
     export_urls: Dict[str, str] = Field(default_factory=dict)
 
 
+class ModelArtifactDescriptor(BaseModel):
+    candidate_id: str = ""
+    artifact_key: str = ""
+    artifact_version: str = ""
+    source_revision: str = ""
+    artifact_uri: str = ""
+    manifest_id: str = ""
+    manifest_fingerprint: str = ""
+
+
 class SeverityEvaluationBreakdown(BaseModel):
     reviewed_count: int = 0
     true_anomaly: int = 0
@@ -176,8 +186,13 @@ class ReviewedAlertPromotionGateResponse(BaseModel):
 
 
 class ModelRegistryEntrySummary(BaseModel):
+    candidate_id: str = ""
     manifest_id: str
     job_id: str = ""
+    artifact_key: str = ""
+    artifact_version: str = ""
+    source_revision: str = ""
+    artifact_uri: str = ""
     state: Literal["prepared", "shadow", "canary", "rolled_back"]
     promotion_decision: Literal["blocked", "shadow", "canary"] = "blocked"
     approve_for_shadow: bool = False
@@ -204,6 +219,7 @@ class ModelRegistryEntrySummary(BaseModel):
 
 class ModelRegistryEventEntry(BaseModel):
     id: int
+    candidate_id: str = ""
     manifest_id: str
     from_state: str = ""
     to_state: str

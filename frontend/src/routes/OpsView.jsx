@@ -56,6 +56,10 @@ function formatRegistryEventLabel(entry) {
   return `${entry.from_state} -> ${entry.to_state}`;
 }
 
+function getRegistryEntryId(entry) {
+  return entry?.candidate_id || entry?.manifest_id || "";
+}
+
 function driftSummary(metric, asPercent = false) {
   if (!metric || metric.absolute_delta == null) return "-";
   return asPercent ? `${Math.round(metric.absolute_delta * 100)} pts` : formatScore(metric.absolute_delta);
@@ -535,10 +539,11 @@ function OpsView({
               <div className="bundleSummary">
                 <div className="bundleSummaryCard">
                   <span>Last Prepared Bundle</span>
-                  <strong>{lastRetrainingBundle.manifest?.manifest_id || "-"}</strong>
+                  <strong>{lastRetrainingBundle.model_artifact?.artifact_version || lastRetrainingBundle.manifest?.manifest_id || "-"}</strong>
                   <div className="muted tiny">
                     {lastRetrainingBundle.recommendation || "hold"} over {lastRetrainingBundle.manifest?.count ?? 0} reviewed alerts
                   </div>
+                  <div className="muted tiny">dataset {lastRetrainingBundle.manifest?.manifest_id || "-"}</div>
                 </div>
                 <div className="bundleSummaryCard">
                   <span>Suggested Split</span>
@@ -551,6 +556,10 @@ function OpsView({
                 <div className="bundleSummaryCard">
                   <span>Recommended Threshold</span>
                   <strong>{formatScore(lastRetrainingBundle.recommended_threshold)}</strong>
+                  <div className="muted tiny">
+                    {lastRetrainingBundle.model_artifact?.artifact_key || "artifact pending"} @{" "}
+                    {lastRetrainingBundle.model_artifact?.source_revision || "unknown"}
+                  </div>
                   <div className="muted tiny">{lastRetrainingBundle.mlflow_run_id || "No MLflow run id available"}</div>
                 </div>
                 <div className="bundleSummaryCard">
@@ -600,22 +609,27 @@ function OpsView({
               {modelRegistryEntries?.length ? (
                 <div className="registryGrid">
                   {modelRegistryEntries.map((entry) => {
-                    const isBusy = registryBusyManifest === entry.manifest_id;
-                    const isHistoryOpen = expandedRegistryManifest === entry.manifest_id;
-                    const isHistoryBusy = registryHistoryBusyManifest === entry.manifest_id;
-                    const history = registryHistoryByManifest[entry.manifest_id] || [];
-                    const noteValue = registryActionNotes[entry.manifest_id] || "";
+                    const entryId = getRegistryEntryId(entry);
+                    const isBusy = registryBusyManifest === entryId;
+                    const isHistoryOpen = expandedRegistryManifest === entryId;
+                    const isHistoryBusy = registryHistoryBusyManifest === entryId;
+                    const history = registryHistoryByManifest[entryId] || [];
+                    const noteValue = registryActionNotes[entryId] || "";
 
                     return (
-                      <div key={entry.manifest_id} className="registryCard">
+                      <div key={entryId} className="registryCard">
                         <div className="alertHead">
-                          <strong>{entry.manifest_id}</strong>
+                          <strong>{entry.artifact_version || entry.manifest_id}</strong>
                           <span className={`healthBadge registry-${entry.state}`}>{formatRegistryStateLabel(entry.state)}</span>
                         </div>
                         <div className="incidentMetaRow">
                           <span className={`healthBadge gate-${entry.promotion_decision}`}>{formatDecisionLabel(entry.promotion_decision)}</span>
                           <span className="muted tiny">{formatTimestamp(entry.updated_at)}</span>
                         </div>
+                        <div className="muted tiny">
+                          {entry.artifact_key || "artifact pending"} @ {entry.source_revision || "unknown"}
+                        </div>
+                        <div className="muted tiny">dataset {entry.manifest_id}</div>
                         <div className="muted tiny">
                           {entry.reviewed_count} reviewed alerts | readiness {entry.readiness_score} | precision {formatPct(entry.current_precision)}
                         </div>
@@ -628,13 +642,13 @@ function OpsView({
                         </div>
                         {entry.status_note ? <div className="historyNote">{entry.status_note}</div> : null}
                         <div className="noteComposer">
-                          <label className="muted tiny" htmlFor={`registry-note-${entry.manifest_id}`}>
+                          <label className="muted tiny" htmlFor={`registry-note-${entryId}`}>
                             Transition note
                           </label>
                           <input
-                            id={`registry-note-${entry.manifest_id}`}
+                            id={`registry-note-${entryId}`}
                             value={noteValue}
-                            onChange={(event) => onRegistryNoteChange(entry.manifest_id, event.target.value)}
+                            onChange={(event) => onRegistryNoteChange(entryId, event.target.value)}
                             placeholder="Add context for promote or rollback"
                           />
                         </div>
@@ -642,7 +656,7 @@ function OpsView({
                           {entry.state === "prepared" ? (
                             <button
                               className="inlineButton"
-                              onClick={() => onRegistryTransition(entry.manifest_id, "shadow")}
+                              onClick={() => onRegistryTransition(entryId, "shadow")}
                               disabled={isBusy || !entry.approve_for_shadow}
                             >
                               {isBusy ? "Updating..." : "Promote To Shadow"}
@@ -651,7 +665,7 @@ function OpsView({
                           {entry.state === "shadow" ? (
                             <button
                               className="inlineButton secondary"
-                              onClick={() => onRegistryTransition(entry.manifest_id, "canary")}
+                              onClick={() => onRegistryTransition(entryId, "canary")}
                               disabled={isBusy || !entry.approve_for_canary}
                             >
                               {isBusy ? "Updating..." : "Promote To Canary"}
@@ -660,13 +674,13 @@ function OpsView({
                           {entry.state === "shadow" || entry.state === "canary" ? (
                             <button
                               className="inlineButton ghost"
-                              onClick={() => onRegistryTransition(entry.manifest_id, "rolled_back")}
+                              onClick={() => onRegistryTransition(entryId, "rolled_back")}
                               disabled={isBusy}
                             >
                               {isBusy ? "Updating..." : "Roll Back"}
                             </button>
                           ) : null}
-                          <button className="inlineButton ghost" onClick={() => onToggleRegistryHistory(entry.manifest_id)} disabled={isHistoryBusy}>
+                          <button className="inlineButton ghost" onClick={() => onToggleRegistryHistory(entryId)} disabled={isHistoryBusy}>
                             {isHistoryBusy ? "Loading..." : isHistoryOpen ? "Hide History" : "Show History"}
                           </button>
                         </div>
@@ -678,7 +692,7 @@ function OpsView({
                               <div className="muted tiny">No registry history recorded for this candidate yet.</div>
                             ) : (
                               history.map((event) => (
-                                <div key={`${entry.manifest_id}-history-${event.id}`} className="historyEntry">
+                                <div key={`${entryId}-history-${event.id}`} className="historyEntry">
                                   <div className="historyEntryHead">
                                     <strong className="historyTitle">{formatRegistryEventLabel(event)}</strong>
                                     <span className="muted tiny">{formatTimestamp(event.created_at)}</span>

@@ -109,8 +109,13 @@ class DeviceCredentialEventRecord(Base):
 class ModelRegistryEntryRecord(Base):
     __tablename__ = "model_registry_entries"
 
-    manifest_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    candidate_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    manifest_id: Mapped[str] = mapped_column(String(64), index=True)
     job_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    artifact_key: Mapped[str] = mapped_column(String(128), default="")
+    artifact_version: Mapped[str] = mapped_column(String(128), default="")
+    source_revision: Mapped[str] = mapped_column(String(128), default="")
+    artifact_uri: Mapped[str] = mapped_column(Text, default="")
     state: Mapped[str] = mapped_column(String(32), index=True, default="prepared")
     promotion_decision: Mapped[str] = mapped_column(String(32), index=True, default="blocked")
     approve_for_shadow: Mapped[bool] = mapped_column(default=False)
@@ -139,6 +144,7 @@ class ModelRegistryEventRecord(Base):
     __tablename__ = "model_registry_events"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    candidate_id: Mapped[str] = mapped_column(String(128), index=True)
     manifest_id: Mapped[str] = mapped_column(String(64), index=True)
     from_state: Mapped[str] = mapped_column(String(32), default="")
     to_state: Mapped[str] = mapped_column(String(32), index=True)

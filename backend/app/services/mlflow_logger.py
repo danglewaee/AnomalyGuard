@@ -23,6 +23,10 @@ def log_retraining_run_metrics(
     *,
     run_name: str,
     manifest_id: str,
+    candidate_id: str,
+    artifact_key: str,
+    artifact_version: str,
+    source_revision: str,
     station_id: str | None,
     since_minutes: int | None,
     readiness_score: int,
@@ -40,6 +44,10 @@ def log_retraining_run_metrics(
 
     with mlflow.start_run(run_name=run_name, nested=True) as run:
         mlflow.log_param("manifest_id", manifest_id)
+        mlflow.log_param("candidate_id", candidate_id)
+        mlflow.log_param("artifact_key", artifact_key)
+        mlflow.log_param("artifact_version", artifact_version)
+        mlflow.log_param("source_revision", source_revision)
         mlflow.log_param("station_id", station_id or "all")
         mlflow.log_param("since_minutes", since_minutes or 0)
         mlflow.log_param("recommendation", recommendation)
