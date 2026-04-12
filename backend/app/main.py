@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.api.routes.alerts import router as alerts_router
 from app.api.routes.community import router as community_router
 from app.api.routes.device import router as device_router
+from app.api.routes.forecasts import router as forecasts_router
 from app.api.routes.ingest import router as ingest_router
 from app.api.routes.incidents import router as incidents_router
 from app.api.routes.jobs import router as jobs_router
@@ -43,6 +44,7 @@ app.include_router(community_router)
 app.include_router(incidents_router)
 app.include_router(alerts_router)
 app.include_router(device_router)
+app.include_router(forecasts_router)
 app.include_router(ingest_router)
 
 

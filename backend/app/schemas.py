@@ -25,6 +25,42 @@ class WaterReading(BaseModel):
     flow_l_min: float
 
 
+class ForecastSignalPrediction(BaseModel):
+    signal: str
+    current_value: float
+    predicted_value: float
+    delta: float
+    safe_min: float
+    safe_max: float
+    risk_level: Literal["stable", "watch", "warning", "critical"]
+    risk_score: float
+    reason: str
+
+
+class WaterQualityForecastPoint(BaseModel):
+    horizon_hours: int
+    forecast_at: datetime
+    method: Literal["persistence", "moving_average", "lag_linear"]
+    risk_level: Literal["stable", "watch", "warning", "critical"]
+    risk_score: float
+    confidence: float
+    signals: List[ForecastSignalPrediction] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class WaterQualityForecastResponse(BaseModel):
+    generated_at: datetime
+    station_id: str | None = None
+    requested_method: Literal["auto", "persistence", "moving_average", "lag_linear"] = "auto"
+    data_points: int = 0
+    cadence_minutes: float | None = None
+    features: List[str] = Field(default_factory=list)
+    methods_considered: List[str] = Field(default_factory=list)
+    forecasts: List[WaterQualityForecastPoint] = Field(default_factory=list)
+    limitations: List[str] = Field(default_factory=list)
+    deep_learning_next_steps: List[str] = Field(default_factory=list)
+
+
 class AnomalyAlert(BaseModel):
     id: str
     timestamp: datetime

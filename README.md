@@ -8,7 +8,7 @@ AI-powered anomaly detection platform for water monitoring, upgraded to a produc
 - Storage: PostgreSQL (TimescaleDB extension attempt) via SQLAlchemy
 - Async jobs: Celery + Redis
 - Streaming integration: Kafka publisher for alerts
-- ML: Isolation Forest + SHAP-ready explainability
+- ML: Isolation Forest + SHAP-ready explainability + baseline-first water-quality forecasting
 - ML ops: MLflow metric logging
 - Monitoring: Prometheus + Grafana
 - Auth: JWT (OAuth2 password flow) + admin RBAC
@@ -20,6 +20,7 @@ AI-powered anomaly detection platform for water monitoring, upgraded to a produc
 - `backend/app/main.py`: API, RBAC, ingest orchestration, metrics endpoint
 - `backend/app/services/store_pg.py`: PostgreSQL data layer
 - `backend/app/services/detector.py`: hybrid anomaly scoring with SHAP fallback
+- `backend/app/services/forecasting.py`: station-level early-warning forecast prototype with persistence, moving-average, and lag-linear baselines
 - `backend/app/tasks.py`: Celery ingestion tasks
 - `deployment/community-impact/default.json`: default community messaging profile for downstream impact
 - `deployment/community-impact/*.json`: deployment-ready examples for urban river, aquaculture-heavy, and rural drinking-water contexts
@@ -121,6 +122,8 @@ Incident workflow endpoints:
   - admin-only retraining readiness and drift summary for reviewed alerts, including recommendation, label-mix drift, score shift, and station concentration shift
 - `GET /api/alerts/labeled/promotion-gate`
   - admin-only promotion policy for reviewed alerts, including `blocked / shadow / canary`, explicit blockers, required actions, and rollback triggers
+- `GET /api/forecasts/water-quality`
+  - read-only station-level early-warning forecast for water quality signals; defaults to `6h`, `12h`, and `24h` horizons and uses `auto` baseline selection
 - `POST /api/alerts/labeled/retraining-jobs`
   - admin-only background job that snapshots the reviewed dataset into a retraining bundle with manifest, readiness, evaluation, promotion gate, suggested split, export URLs, and optional MLflow run metadata
 - `GET /api/model-registry`
@@ -265,6 +268,14 @@ FAANG-grade platform planning docs:
 - Candidates move through `prepared`, `shadow`, `canary`, and `rolled_back`
 - Promotion gate decisions (`blocked`, `shadow`, `canary`) are snapshot into the registry entry and logged to MLflow
 - Each state change writes an audit event with actor, note, and transition metadata
+
+## Forecasting Extension
+
+- `GET /api/forecasts/water-quality?station_id=mekong-can-tho&horizon_hours=6&horizon_hours=12&method=auto`
+- The extension reframes anomaly detection as early-warning risk forecasting.
+- It is intentionally baseline-first: `persistence`, `moving_average`, and `lag_linear` are evaluated before any LSTM/Informer-style model is promoted.
+- Each forecast includes predicted signal values, signal-level risk, overall risk, confidence, limitations, and deep-learning next steps.
+- Full notes: `docs/forecasting-extension.md`
 
 ## Schema Governance
 

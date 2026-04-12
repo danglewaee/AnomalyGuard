@@ -26,6 +26,7 @@ import httpx
 from app.api.routes import alerts as alert_routes
 from app.api.routes import community as community_routes
 from app.api.routes import device as device_routes
+from app.api.routes import forecasts as forecast_routes
 from app.api.routes import ingest as ingest_routes
 from app.api.routes import incidents as incident_routes
 from app.api.routes import jobs as jobs_routes
@@ -623,6 +624,49 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
         send_task.assert_called_once()
         self.assertEqual(send_task.call_args.args[0], "tasks.prepare_reviewed_alert_training_job")
         self.assertEqual(send_task.call_args.kwargs["args"], ["mekong-can-tho", 10080, 1000, 50])
+
+    async def test_water_quality_forecast_returns_station_level_risk_projection(self) -> None:
+        now = datetime.now(UTC)
+        readings = [
+            WaterReading(
+                timestamp=now - timedelta(hours=5 - index),
+                station_id="mekong-can-tho",
+                ph=7.2,
+                tds=220.0,
+                turbidity=2.0 + index * 0.1,
+                temperature_c=28.0,
+                do_mg_l=7.0,
+                flow_l_min=10.0,
+            )
+            for index in range(6)
+        ]
+
+        class FakeStore:
+            def __init__(self, db: object) -> None:
+                self.db = db
+
+            def latest_readings(self, limit: int, station_id: str | None = None, since_minutes: int | None = None) -> list[WaterReading]:
+                self.request = {"limit": limit, "station_id": station_id, "since_minutes": since_minutes}
+                return readings
+
+        with patch.object(forecast_routes, "PostgresStore", FakeStore):
+            response = await self.client.get(
+                "/api/forecasts/water-quality",
+                params={
+                    "station_id": "mekong-can-tho",
+                    "horizon_hours": 6,
+                    "method": "persistence",
+                    "limit": 50,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["station_id"], "mekong-can-tho")
+        self.assertEqual(payload["requested_method"], "persistence")
+        self.assertEqual(payload["forecasts"][0]["method"], "persistence")
+        self.assertEqual(payload["forecasts"][0]["horizon_hours"], 6)
+        self.assertIn("deep_learning_next_steps", payload)
 
     async def test_retraining_manifest_reports_balance_and_export_urls(self) -> None:
         now = datetime.now(UTC)
