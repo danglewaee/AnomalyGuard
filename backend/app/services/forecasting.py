@@ -4,24 +4,26 @@ from typing import Literal
 import numpy as np
 
 from app.schemas import ForecastSignalPrediction, WaterQualityForecastPoint, WaterQualityForecastResponse, WaterReading
+from app.services.deep_forecasting import forecast_with_lstm
 from app.services.detector import FEATURES, RULES
 
 
-ForecastMethod = Literal["auto", "persistence", "moving_average", "lag_linear"]
-ConcreteForecastMethod = Literal["persistence", "moving_average", "lag_linear"]
+ForecastMethod = Literal["auto", "persistence", "moving_average", "lag_linear", "lstm"]
+ConcreteForecastMethod = Literal["persistence", "moving_average", "lag_linear", "lstm"]
 
 
 _DEFAULT_LIMITATIONS = [
     "This is an early-warning prototype, not a public health determination.",
     "Predictions depend on sensor calibration, station coverage, and missing-data quality.",
-    "Deep learning should only be promoted after beating simple baselines on held-out data.",
+    "The LSTM path is a prototype candidate and should be promoted only after held-out validation.",
 ]
 
 _DEEP_LEARNING_NEXT_STEPS = [
     "Collect longer station-level time series with verified sensor calibration metadata.",
-    "Benchmark persistence, moving-average, and lag-linear baselines before LSTM/Informer models.",
-    "Train sequence models only after there are enough contiguous readings per station and season.",
+    "Train LSTM, ConvLSTM, or attention-based models on contiguous readings per station and season.",
+    "Add weather, tide, rainfall, upstream discharge, and station-neighborhood context for spatiotemporal learning.",
     "Evaluate both value error (MAE/RMSE) and warning utility (precision, recall, false alarm rate, lead time).",
+    "Promote deep models through the existing registry only when they beat baselines and pass rollback gates.",
 ]
 
 
@@ -133,7 +135,7 @@ def _confidence(method: ConcreteForecastMethod, data_points: int, required_point
         return 0.0
     coverage = min(1.0, data_points / max(required_points, 1))
     horizon_penalty = max(0.35, 1.0 - min(horizon_steps, 48) * 0.01)
-    method_weight = {"persistence": 0.45, "moving_average": 0.6, "lag_linear": 0.75}[method]
+    method_weight = {"persistence": 0.45, "moving_average": 0.6, "lag_linear": 0.75, "lstm": 0.82}[method]
     return round(float(max(0.1, min(0.95, coverage * horizon_penalty * method_weight + 0.15))), 3)
 
 
@@ -145,6 +147,8 @@ def build_water_quality_forecast(
     method: ForecastMethod = "auto",
     moving_window: int = 12,
     lag_steps: int = 6,
+    lstm_sequence_length: int = 12,
+    lstm_epochs: int = 80,
 ) -> WaterQualityForecastResponse:
     ordered = sorted(readings, key=lambda item: item.timestamp)
     generated_at = datetime.now(timezone.utc)
@@ -173,7 +177,7 @@ def build_water_quality_forecast(
     current = values[-1]
     last_timestamp = ordered[-1].timestamp
     forecasts: list[WaterQualityForecastPoint] = []
-    methods_considered = ["persistence", "moving_average", "lag_linear"]
+    methods_considered = ["persistence", "moving_average", "lag_linear", "lstm"]
 
     for horizon in sorted(set(horizon_hours)):
         horizon_steps = max(1, int(round((horizon * 60.0) / cadence_minutes)))
@@ -187,26 +191,74 @@ def build_water_quality_forecast(
         elif method == "moving_average":
             selected_method = "moving_average"
             prediction = _moving_average(values, moving_window)
-        else:
+        elif method == "lag_linear":
             lag_prediction, lag_warning = _lag_linear_forecast(values, horizon_steps, lag_steps)
-            if method == "lag_linear" and lag_prediction is None:
+            if lag_prediction is None:
                 selected_method = "moving_average" if len(values) >= 3 else "persistence"
                 prediction = _moving_average(values, moving_window) if selected_method == "moving_average" else current
                 warnings.append(lag_warning or "lag_linear unavailable; used fallback baseline")
-            elif lag_prediction is None:
-                selected_method = "moving_average" if len(values) >= 3 else "persistence"
-                prediction = _moving_average(values, moving_window) if selected_method == "moving_average" else current
-                warnings.append(lag_warning or "lag_linear unavailable; used fallback baseline")
+                warnings.append("requested lag_linear could not be trained for this horizon")
             else:
                 selected_method = "lag_linear"
                 prediction = lag_prediction
+        elif method == "lstm":
+            lstm_result = forecast_with_lstm(
+                values,
+                horizon_steps=horizon_steps,
+                sequence_length=lstm_sequence_length,
+                epochs=lstm_epochs,
+            )
+            if lstm_result.prediction is None:
+                lag_prediction, lag_warning = _lag_linear_forecast(values, horizon_steps, lag_steps)
+                if lag_prediction is None:
+                    selected_method = "moving_average" if len(values) >= 3 else "persistence"
+                    prediction = _moving_average(values, moving_window) if selected_method == "moving_average" else current
+                    warnings.append(lag_warning or "lag_linear unavailable; used fallback baseline")
+                else:
+                    selected_method = "lag_linear"
+                    prediction = lag_prediction
+                warnings.append(lstm_result.warning or "lstm unavailable; used fallback baseline")
+            else:
+                selected_method = "lstm"
+                prediction = lstm_result.prediction
+                warnings.append(f"lstm trained in-memory for {lstm_result.epochs_trained} epochs; treat as prototype candidate")
+        else:  # auto
+            lstm_result = forecast_with_lstm(
+                values,
+                horizon_steps=horizon_steps,
+                sequence_length=lstm_sequence_length,
+                epochs=lstm_epochs,
+            )
+            if lstm_result.prediction is not None:
+                selected_method = "lstm"
+                prediction = lstm_result.prediction
+                warnings.append(f"auto selected lstm and trained in-memory for {lstm_result.epochs_trained} epochs")
+            else:
+                lag_prediction, lag_warning = _lag_linear_forecast(values, horizon_steps, lag_steps)
+                if lag_prediction is None:
+                    selected_method = "moving_average" if len(values) >= 3 else "persistence"
+                    prediction = _moving_average(values, moving_window) if selected_method == "moving_average" else current
+                    warnings.append(lstm_result.warning or "lstm unavailable; baseline selected")
+                    warnings.append(lag_warning or "lag_linear unavailable; used fallback baseline")
+                else:
+                    selected_method = "lag_linear"
+                    prediction = lag_prediction
+                    if lstm_result.warning:
+                        warnings.append(lstm_result.warning)
+
+        if prediction is None:
+            selected_method = "moving_average" if len(values) >= 3 else "persistence"
+            prediction = _moving_average(values, moving_window) if selected_method == "moving_average" else current
 
         signal_predictions = [
             _signal_risk(feature, float(current[index]), float(prediction[index]))
             for index, feature in enumerate(FEATURES)
         ]
         risk_score = max(signal.risk_score for signal in signal_predictions)
-        required_points = lag_steps + horizon_steps + 4 if selected_method == "lag_linear" else moving_window
+        if selected_method == "lstm":
+            required_points = lstm_sequence_length + horizon_steps + 8
+        else:
+            required_points = lag_steps + horizon_steps + 4 if selected_method == "lag_linear" else moving_window
         forecasts.append(
             WaterQualityForecastPoint(
                 horizon_hours=horizon,

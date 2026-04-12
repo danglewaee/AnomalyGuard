@@ -29,7 +29,7 @@ def water_quality_forecast(
     since_minutes: int | None = Query(default=10080, ge=30, le=43200),
     limit: int = Query(default=1000, ge=2, le=5000),
     horizon_hours: list[int] = Query(default=[6, 12, 24]),
-    method: Literal["auto", "persistence", "moving_average", "lag_linear"] = Query(default="auto"),
+    method: Literal["auto", "persistence", "moving_average", "lag_linear", "lstm"] = Query(default="auto"),
     db: Session = Depends(get_db),
 ) -> dict:
     station_id = station_id or default_station_id()

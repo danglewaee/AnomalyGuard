@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("ALLOW_INSECURE_DEFAULTS", "false")
@@ -22,6 +23,7 @@ if DEPS_ROOT.exists() and str(DEPS_ROOT) not in sys.path:
     sys.path.insert(0, str(DEPS_ROOT))
 
 from app.schemas import WaterReading
+from app.services.deep_forecasting import LSTMForecastResult
 from app.services.forecasting import build_water_quality_forecast
 
 
@@ -85,3 +87,22 @@ class ForecastingTests(unittest.TestCase):
         self.assertEqual(response.forecasts[0].method, "moving_average")
         self.assertTrue(response.forecasts[0].warnings)
 
+    def test_lstm_request_falls_back_cleanly_when_torch_is_unavailable(self) -> None:
+        readings = [_reading(index, turbidity=2.0 + index * 0.05) for index in range(20)]
+
+        with patch(
+            "app.services.forecasting.forecast_with_lstm",
+            return_value=LSTMForecastResult(prediction=None, warning="PyTorch is not installed."),
+        ):
+            response = build_water_quality_forecast(
+                readings,
+                station_id="mekong-can-tho",
+                horizon_hours=[6],
+                method="lstm",
+                lag_steps=6,
+            )
+
+        self.assertEqual(response.requested_method, "lstm")
+        self.assertIn(response.forecasts[0].method, {"lag_linear", "moving_average", "persistence", "lstm"})
+        self.assertTrue(any("lstm" in warning.lower() or "pytorch" in warning.lower() for warning in response.forecasts[0].warnings))
+        self.assertIn("lstm", response.methods_considered)

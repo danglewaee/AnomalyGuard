@@ -40,7 +40,7 @@ class ForecastSignalPrediction(BaseModel):
 class WaterQualityForecastPoint(BaseModel):
     horizon_hours: int
     forecast_at: datetime
-    method: Literal["persistence", "moving_average", "lag_linear"]
+    method: Literal["persistence", "moving_average", "lag_linear", "lstm"]
     risk_level: Literal["stable", "watch", "warning", "critical"]
     risk_score: float
     confidence: float
@@ -51,7 +51,7 @@ class WaterQualityForecastPoint(BaseModel):
 class WaterQualityForecastResponse(BaseModel):
     generated_at: datetime
     station_id: str | None = None
-    requested_method: Literal["auto", "persistence", "moving_average", "lag_linear"] = "auto"
+    requested_method: Literal["auto", "persistence", "moving_average", "lag_linear", "lstm"] = "auto"
     data_points: int = 0
     cadence_minutes: float | None = None
     features: List[str] = Field(default_factory=list)

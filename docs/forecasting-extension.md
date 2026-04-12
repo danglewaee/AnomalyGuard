@@ -1,8 +1,8 @@
 # Forecasting Extension
 
-AnomalyGuard now includes a lightweight forecasting prototype that reframes the original monitoring system from reactive anomaly detection into early-warning risk forecasting.
+AnomalyGuard now includes a deep-learning-forward forecasting prototype that reframes the original monitoring system from reactive anomaly detection into early-warning risk forecasting.
 
-The extension is intentionally baseline-first. It does not claim that LSTM or Transformer models are automatically better. Instead, it follows the lesson from water-quality forecasting literature: compare simple baselines before promoting deep learning.
+The extension includes a real optional PyTorch LSTM path, while still keeping simpler models as scientific controls. This lets the project communicate a deep learning direction without pretending that model complexity alone earns trust.
 
 ## Current Scope
 
@@ -12,7 +12,8 @@ The extension is intentionally baseline-first. It does not claim that LSTM or Tr
   - `persistence`: future value equals latest value
   - `moving_average`: future value equals recent window mean
   - `lag_linear`: a lightweight linear lag model over recent multivariate windows
-  - `auto`: uses `lag_linear` when enough station history exists, otherwise falls back to a baseline
+  - `lstm`: trains a compact station-level LSTM in memory when PyTorch and enough readings are available
+  - `auto`: prefers `lstm` when available, then falls back to `lag_linear` or simpler baselines
 - Output:
   - predicted signal values
   - signal-level risk levels
@@ -20,33 +21,45 @@ The extension is intentionally baseline-first. It does not claim that LSTM or Tr
   - confidence estimate
   - limitations and deep-learning next steps
 
-## Why Baseline First
+## Why Deep Learning
 
-For a public-interest water project, using a complex model is not enough. The system has to earn trust. A simple baseline provides a reference point for whether LSTM, Informer, or other sequence models are actually improving:
+Water quality is a multivariate time-series problem. Signals such as turbidity, pH, dissolved oxygen, and flow can change with delayed effects after rainfall, upstream discharge, tidal shifts, or operational changes. LSTM-style sequence models are useful because they can preserve information over previous time steps and learn temporal precursors before a fixed threshold is crossed.
+
+## Why Keep Baselines
+
+Baselines are not a retreat from deep learning. They are the control group that proves whether a deep model is adding value. A public-interest warning system should show that a deep model improves:
 
 - Value accuracy: `MAE`, `RMSE`
 - Warning utility: precision, recall, false alarm rate, and lead time
 - Operational trust: whether alerts are stable enough for operators or local authorities to act on
 
-## API
+## Enable LSTM Runtime
+
+The default backend install keeps PyTorch optional to avoid making every deployment heavy. To enable the LSTM path:
 
 ```powershell
-curl "http://localhost:8000/api/forecasts/water-quality?station_id=mekong-can-tho&horizon_hours=6&horizon_hours=12&method=auto"
+cd backend
+python -m pip install -r requirements-dl.txt
 ```
 
-The endpoint is read-only and station-level. If `station_id` is omitted, it uses the default station.
+Then request:
+
+```powershell
+curl "http://localhost:8000/api/forecasts/water-quality?station_id=mekong-can-tho&horizon_hours=6&horizon_hours=12&method=lstm"
+```
+
+If PyTorch is not installed or there is not enough station history, the endpoint returns a baseline fallback with an explicit warning instead of failing.
 
 ## Interview Framing
 
 Use this wording when explaining the project:
 
-> The original project detected water-quality anomalies from sensor readings. The forecasting extension asks a more useful question: can we estimate risk before the water becomes unsafe? I started with persistence, moving-average, and lag-linear baselines because in public-interest work, credibility matters more than model complexity. LSTM or Transformer-style models would be the next step only after they beat these baselines on held-out station data and improve early-warning lead time without causing too many false alarms.
+> The original project detected water-quality anomalies from sensor readings. The forecasting extension asks a more useful question: can we estimate risk before the water becomes unsafe? I added a station-level LSTM forecasting path because water quality has temporal dependencies across pH, turbidity, dissolved oxygen, and flow. In a richer deployment with multiple stations, I would extend this toward spatiotemporal models such as ConvLSTM or attention-based architectures. I still keep persistence and lag-linear baselines because they define the bar a deep model must beat before it should be trusted in a public-interest setting.
 
 ## Deep Learning Roadmap
 
 - Collect longer calibrated station-level time series.
 - Add weather, tide, rainfall, upstream discharge, and seasonal context.
-- Train an LSTM/Informer/LTSF-style model as a candidate artifact.
-- Compare it against persistence, moving average, and lag-linear baselines.
+- Train LSTM, ConvLSTM, Informer, or LTSF-style model candidates as versioned artifacts.
+- Compare every deep model against persistence, moving average, and lag-linear baselines.
 - Promote it through the existing model registry only if promotion gates pass.
-

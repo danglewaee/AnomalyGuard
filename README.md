@@ -8,7 +8,7 @@ AI-powered anomaly detection platform for water monitoring, upgraded to a produc
 - Storage: PostgreSQL (TimescaleDB extension attempt) via SQLAlchemy
 - Async jobs: Celery + Redis
 - Streaming integration: Kafka publisher for alerts
-- ML: Isolation Forest + SHAP-ready explainability + baseline-first water-quality forecasting
+- ML: Isolation Forest + SHAP-ready explainability + deep-learning-forward water-quality forecasting
 - ML ops: MLflow metric logging
 - Monitoring: Prometheus + Grafana
 - Auth: JWT (OAuth2 password flow) + admin RBAC
@@ -20,7 +20,7 @@ AI-powered anomaly detection platform for water monitoring, upgraded to a produc
 - `backend/app/main.py`: API, RBAC, ingest orchestration, metrics endpoint
 - `backend/app/services/store_pg.py`: PostgreSQL data layer
 - `backend/app/services/detector.py`: hybrid anomaly scoring with SHAP fallback
-- `backend/app/services/forecasting.py`: station-level early-warning forecast prototype with persistence, moving-average, and lag-linear baselines
+- `backend/app/services/forecasting.py`: station-level early-warning forecast prototype with persistence, moving-average, lag-linear, and optional PyTorch LSTM methods
 - `backend/app/tasks.py`: Celery ingestion tasks
 - `deployment/community-impact/default.json`: default community messaging profile for downstream impact
 - `deployment/community-impact/*.json`: deployment-ready examples for urban river, aquaculture-heavy, and rural drinking-water contexts
@@ -123,7 +123,7 @@ Incident workflow endpoints:
 - `GET /api/alerts/labeled/promotion-gate`
   - admin-only promotion policy for reviewed alerts, including `blocked / shadow / canary`, explicit blockers, required actions, and rollback triggers
 - `GET /api/forecasts/water-quality`
-  - read-only station-level early-warning forecast for water quality signals; defaults to `6h`, `12h`, and `24h` horizons and uses `auto` baseline selection
+  - read-only station-level early-warning forecast for water quality signals; defaults to `6h`, `12h`, and `24h` horizons and supports `auto`, `lstm`, `lag_linear`, `moving_average`, and `persistence`
 - `POST /api/alerts/labeled/retraining-jobs`
   - admin-only background job that snapshots the reviewed dataset into a retraining bundle with manifest, readiness, evaluation, promotion gate, suggested split, export URLs, and optional MLflow run metadata
 - `GET /api/model-registry`
@@ -271,10 +271,11 @@ FAANG-grade platform planning docs:
 
 ## Forecasting Extension
 
-- `GET /api/forecasts/water-quality?station_id=mekong-can-tho&horizon_hours=6&horizon_hours=12&method=auto`
-- The extension reframes anomaly detection as early-warning risk forecasting.
-- It is intentionally baseline-first: `persistence`, `moving_average`, and `lag_linear` are evaluated before any LSTM/Informer-style model is promoted.
+- `GET /api/forecasts/water-quality?station_id=mekong-can-tho&horizon_hours=6&horizon_hours=12&method=lstm`
+- The extension reframes anomaly detection as early-warning risk forecasting with an optional PyTorch LSTM path.
+- The project remains rigorous: `persistence`, `moving_average`, and `lag_linear` stay as controls, while `lstm` is the deep sequence-model candidate.
 - Each forecast includes predicted signal values, signal-level risk, overall risk, confidence, limitations, and deep-learning next steps.
+- Install `backend/requirements-dl.txt` to enable the optional LSTM runtime.
 - Full notes: `docs/forecasting-extension.md`
 
 ## Schema Governance
